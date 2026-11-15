@@ -109,7 +109,11 @@ class MainActivity : AppCompatActivity() {
         h.rowFolder.setOnClickListener { it.haptic(); pickFolder.launch(prefs.treeUri) }
         h.rowQuality.setOnClickListener { it.haptic(); chooseQuality() }
         h.segMp3.setOnClickListener { if (!DownloadState.running) { it.haptic(); setFormat(Format.MP3) } }
-        h.segMp4.setOnClickListener { if (!DownloadState.running) { it.haptic(); setFormat(Format.MP4) } }
+        h.segMp4.setOnClickListener {
+            if (DownloadState.running) return@setOnClickListener
+            if (prefs.platform == Platform.SPOTIFY) { toast("De Spotify se descarga solo el audio (MP3)"); return@setOnClickListener }
+            it.haptic(); setFormat(Format.MP4)
+        }
         b.btnDownload.setOnClickListener { it.haptic(true); startDownload() }
         pressScale(b.btnDownload, b.downloadFrame)
         b.btnCancel.setOnClickListener { it.haptic(); confirmCancel() }
@@ -131,7 +135,7 @@ class MainActivity : AppCompatActivity() {
         h.loginCard.setOnClickListener { it.haptic(); openVerify(Platform.INSTAGRAM) }
         h.loginCard.pressable(0.97f)
         mapOf(h.tabYoutube to Platform.YOUTUBE, h.tabTiktok to Platform.TIKTOK, h.tabInstagram to Platform.INSTAGRAM,
-            h.tabFacebook to Platform.FACEBOOK)
+            h.tabFacebook to Platform.FACEBOOK, h.tabSpotify to Platform.SPOTIFY)
             .forEach { (v, p) ->
                 v.pressable(0.95f)
                 v.setOnClickListener { if (!DownloadState.running) { it.haptic(); setPlatform(p) } }
@@ -143,7 +147,7 @@ class MainActivity : AppCompatActivity() {
 
         // Restaurar textos si la pantalla se recrea (giro, modo oscuro…)
         if (DownloadState.items.isNotEmpty()) {
-            h.listTitle.text = if (DownloadState.isPlaylist) "${DownloadState.items.size} videos" else "Video"
+            h.listTitle.text = if (DownloadState.isPlaylist) "${DownloadState.items.size} ${noun()}" else noun(1)
             h.infoText.text = if (DownloadState.isPlaylist) "Playlist «${DownloadState.listTitle}»" else ""
             h.infoText.visibility = if (DownloadState.isPlaylist) View.VISIBLE else View.GONE
         }
@@ -210,7 +214,7 @@ class MainActivity : AppCompatActivity() {
     private fun setPlatform(p: Platform, animate: Boolean = true) {
         prefs.platform = p
         val tabs = mapOf(Platform.YOUTUBE to h.tabYoutube, Platform.TIKTOK to h.tabTiktok,
-            Platform.INSTAGRAM to h.tabInstagram, Platform.FACEBOOK to h.tabFacebook)
+            Platform.INSTAGRAM to h.tabInstagram, Platform.FACEBOOK to h.tabFacebook, Platform.SPOTIFY to h.tabSpotify)
         tabs.forEach { (tp, v) ->
             v.isSelected = tp == p
             v.alpha = if (tp == p) 1f else 0.7f
@@ -222,6 +226,7 @@ class MainActivity : AppCompatActivity() {
             Platform.TIKTOK -> "Pega el enlace del TikTok"
             Platform.INSTAGRAM -> "Pega el enlace del reel o publicación"
             Platform.FACEBOOK -> "Pega el enlace del video o reel de Facebook"
+            Platform.SPOTIFY -> "Pega el enlace de la playlist, álbum o canción"
         }
         if (DownloadState.items.isEmpty() && !analyzing) {
             h.infoText.visibility = View.VISIBLE
@@ -231,8 +236,15 @@ class MainActivity : AppCompatActivity() {
                 Platform.INSTAGRAM -> "Reels y videos de publicaciones en MP4 o MP3. También funciona «Compartir» desde Instagram. " +
                     "Si Instagram pidiera iniciar sesión, te avisaremos."
                 Platform.FACEBOOK -> "Videos y reels públicos de Facebook en MP4 o MP3. También funciona «Compartir» desde Facebook."
+                Platform.SPOTIFY -> "Playlists, álbumes y canciones de Spotify en MP3: la app lee la lista y baja cada canción " +
+                    "desde YouTube (Spotify no permite bajar su audio). Hasta ${SpotifySource.MAX_TRACKS} canciones por enlace."
             }
         }
+        // Spotify: solo MP3
+        val sp = p == Platform.SPOTIFY
+        if (sp && prefs.format != Format.MP3) setFormat(Format.MP3)
+        h.segMp4.isEnabled = !sp && !DownloadState.running
+        h.segMp4.alpha = if (sp) 0.35f else 1f
         showLoginCard()
     }
 
@@ -318,7 +330,9 @@ class MainActivity : AppCompatActivity() {
                 if (Updater.ensureFresh(applicationContext, App.UPDATE_EVERY_MS, 30_000) != null) {
                     h.infoText.text = "yt-dlp actualizado. Buscando…"
                 } else h.infoText.text = "Buscando…"
-                val json = withContext(Dispatchers.IO) {
+                val spotifyResult = if (platform == Platform.SPOTIFY)
+                    withContext(Dispatchers.IO) { SpotifySource.fetch(url) } else null
+                val json = if (spotifyResult != null) "" else withContext(Dispatchers.IO) {
                     fun info(fast: Boolean): String {
                         val cookies = Cookies.tempCopy(applicationContext)
                         try {
@@ -339,7 +353,7 @@ class MainActivity : AppCompatActivity() {
                         if (Util.isBotCheck(e.message) || platform != Platform.YOUTUBE) throw e else info(fast = false)
                     }
                 }
-                val (title, isPlaylist, list) = withContext(Dispatchers.Default) { Util.parseInfo(json, platform) }
+                val (title, isPlaylist, list) = spotifyResult ?: withContext(Dispatchers.Default) { Util.parseInfo(json, platform) }
                 DownloadState.items.clear()
                 DownloadState.items.addAll(list)
                 DownloadState.listTitle = title
@@ -347,9 +361,15 @@ class MainActivity : AppCompatActivity() {
                 DownloadState.finishedMessage = null
                 DownloadState.totalCount = 0
                 if (list.isEmpty()) throw IllegalStateException("ERROR: no se encontraron videos en ese enlace")
-                h.infoText.text = if (isPlaylist) "Playlist «$title»" else ""
+                h.infoText.text = when {
+                    !isPlaylist -> ""
+                    platform == Platform.SPOTIFY && list.size >= SpotifySource.MAX_TRACKS ->
+                        "Spotify «$title»: se muestran las primeras ${SpotifySource.MAX_TRACKS} canciones (límite de Spotify)."
+                    platform == Platform.SPOTIFY -> "Spotify «$title» · cada canción se buscará en YouTube"
+                    else -> "Playlist «$title»"
+                }
                 h.infoText.visibility = if (isPlaylist) View.VISIBLE else View.GONE
-                h.listTitle.text = if (isPlaylist) "${list.size} videos" else "Video"
+                h.listTitle.text = if (isPlaylist) "${list.size} ${noun()}" else noun(1)
                 adapter.notifyDataSetChanged()
                 b.downloadFrame.postDelayed({ b.downloadFrame.bounce() }, 150)
             } catch (e: Throwable) {
@@ -360,6 +380,8 @@ class MainActivity : AppCompatActivity() {
                         Platform.INSTAGRAM -> Triple("Instagram pide iniciar sesión para ver este contenido.",
                             "Instagram pide iniciar sesión. Hazlo una vez y la app lo recordará (te recomendamos una cuenta secundaria).",
                             "Iniciar sesión en Instagram")
+                        Platform.SPOTIFY -> Triple("YouTube pide verificar que no eres un robot.",
+                            "YouTube pide confirmar que no eres un robot. Resuélvelo una vez y la app lo recordará.", "Verificar ahora")
                         Platform.FACEBOOK -> Triple("Facebook pide iniciar sesión para ver este video.",
                             "Este video de Facebook no es público o Facebook pide iniciar sesión. Hazlo una vez y la app lo recordará.",
                             "Iniciar sesión en Facebook")
@@ -427,6 +449,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** "videos" o "canciones" (Spotify). */
+    private fun noun(n: Int = 2): String {
+        val sp = DownloadState.items.firstOrNull()?.platform == Platform.SPOTIFY
+        return if (n == 1) (if (sp) "Canción" else "Video") else (if (sp) "canciones" else "videos")
+    }
+
     private fun selectedCount(): Int =
         if (DownloadState.items.size == 1) 1 else DownloadState.items.count { it.checked }
 
@@ -435,13 +463,13 @@ class MainActivity : AppCompatActivity() {
         val total = DownloadState.items.size
         h.btnSelectAll.text = if (total > 0 && DownloadState.items.all { it.checked }) "Quitar todo" else "Seleccionar todo"
         h.btnSelectAll.visibility = if (total > 1 && !DownloadState.running) View.VISIBLE else View.GONE
-        if (total > 1) h.listTitle.text = "$total videos · $sel seleccionados"
+        if (total > 1) h.listTitle.text = "$total ${noun()} · $sel seleccionados"
         val ext = prefs.format.ext.uppercase(Locale.ROOT)
         b.btnDownload.isEnabled = !DownloadState.running && !analyzing && sel > 0
         b.btnDownload.text = when {
             DownloadState.running -> "Descargando…"
             total == 0 -> "Descargar"
-            sel == 0 -> "Selecciona videos"
+            sel == 0 -> "Selecciona ${noun()}"
             sel > 1 -> "⬇  Descargar $sel en $ext"
             else -> "⬇  Descargar $ext"
         }

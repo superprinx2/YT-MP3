@@ -334,7 +334,8 @@ class DownloadService : Service() {
     // ------------------------------------------------------------------ verificación "no soy un robot"
     /** Pausa la cola para que el usuario verifique. false = ya se intentó demasiadas veces. */
     private fun requestVerification(item: VideoItem): Boolean {
-        val p = item.platform
+        // Las canciones de Spotify se bajan de YouTube: la verificación es la de YouTube.
+        val p = if (item.platform == Platform.SPOTIFY) Platform.YOUTUBE else item.platform
         synchronized(this) {
             if (verifyPaused) return true
             if (p == Platform.YOUTUBE) botBackoffUntil = SystemClock.elapsedRealtime() + 5 * 60 * 1000
@@ -351,6 +352,8 @@ class DownloadService : Service() {
         val (phaseMsg, title, text) = when (p) {
             Platform.INSTAGRAM -> Triple("En pausa: Instagram pide iniciar sesión",
                 "Instagram pide iniciar sesión", "Toca para iniciar sesión y continuar con las descargas.")
+            Platform.SPOTIFY -> Triple("En pausa: YouTube pide verificar que no eres un robot",
+                "YouTube pide verificación", "Toca para resolver la verificación y continuar con las descargas.")
             Platform.FACEBOOK -> Triple("En pausa: Facebook pide iniciar sesión",
                 "Facebook pide iniciar sesión", "Toca para iniciar sesión y continuar con las descargas.")
             Platform.TIKTOK -> Triple("En pausa: TikTok pide verificación",
@@ -374,7 +377,9 @@ class DownloadService : Service() {
 
         // Intentos: cliente por defecto y, si YouTube responde 403 u otro error, clientes
         // alternativos. Si todos fallan, se fuerza una actualización de yt-dlp y se reintenta.
-        val attempts = if (item.platform == Platform.YOUTUBE)
+        val attempts = if (item.platform == Platform.SPOTIFY)
+            mutableListOf<String?>("sp:filter", "sp:plain")   // 1º con filtro de duración, 2º sin filtro
+        else if (item.platform == Platform.YOUTUBE)
             mutableListOf<String?>(null, "youtube:player_client=visionos,tv_simply", "youtube:player_client=tv,web_safari,mweb")
         else mutableListOf<String?>(null, null)   // TikTok/Instagram: un reintento simple
         var error: String? = null
@@ -392,7 +397,7 @@ class DownloadService : Service() {
                 if (error == null || hasOutput(tmp, format)) { error = null; break }
                 if (cancelRequested) return Result.CANCELLED
                 if (Util.isBotCheck(error)) return Result.BOT
-                if (item.platform != Platform.YOUTUBE && Util.needsLogin(error)) return Result.BOT
+                if (item.platform != Platform.YOUTUBE && item.platform != Platform.SPOTIFY && Util.needsLogin(error)) return Result.BOT
                 if (!isRetryable(error)) break
                 i++
                 if (i == attempts.size && !forcedUpdate) {
@@ -439,12 +444,26 @@ class DownloadService : Service() {
     /** Ejecuta yt-dlp una vez. Devuelve null si terminó bien o el mensaje de error. */
     private fun runYtdlp(item: VideoItem, format: Format, quality: Int, tmp: File, extractorArgs: String?): String? {
         val cookies = Cookies.tempCopy(this)
-        val req = YoutubeDLRequest(item.url).apply {
-            if (extractorArgs != null) addOption("--extractor-args", extractorArgs)
+        val spotify = item.platform == Platform.SPOTIFY
+        val format = if (spotify) Format.MP3 else format    // de Spotify solo tiene sentido el audio
+        val reqUrl = if (spotify) {
+            val q = item.url.removePrefix("spotify:")
+            if (extractorArgs == "sp:plain") "ytsearch1:$q audio" else "ytsearch5:$q"
+        } else item.url
+        val req = YoutubeDLRequest(reqUrl).apply {
+            if (extractorArgs != null && !spotify) addOption("--extractor-args", extractorArgs)
+            if (spotify) {
+                // Elegir el resultado cuya duración coincide con la de Spotify (evita en vivo/remix).
+                val d = item.duration?.toInt()
+                if (extractorArgs == "sp:filter" && d != null && d > 0) {
+                    addOption("--match-filter", "duration>=${d - 25} & duration<=${d + 25}")
+                }
+                addOption("--max-downloads", 1)
+            }
             if (cookies != null) addOption("--cookies", cookies.absolutePath)
             // Caché compartida: el desafío JS de YouTube se resuelve una vez y lo reutilizan todas.
             addOption("--cache-dir", App.cacheDir(this@DownloadService).absolutePath)
-            addOption("--no-playlist")
+            if (!spotify) addOption("--no-playlist")
             addOption("--newline")
             addOption("--no-mtime")
             addOption("--windows-filenames")          // nombres válidos en tarjetas SD (FAT)
@@ -459,7 +478,8 @@ class DownloadService : Service() {
                 // "9.9K views · 340 reactions | Texto" → "Texto"
                 addCommands(listOf("--replace-in-metadata", "title", "^[^|]*\\|\\s*", ""))
             }
-            addOption("-o", if (item.platform == Platform.YOUTUBE) "${tmp.absolutePath}/%(title)s.%(ext)s"
+            addOption("-o", if (spotify) "${tmp.absolutePath}/${safeName(item.title)}.%(ext)s"
+                            else if (item.platform == Platform.YOUTUBE) "${tmp.absolutePath}/%(title)s.%(ext)s"
                             else "${tmp.absolutePath}/%(uploader,channel|video)s - %(title).60B [%(id)s].%(ext)s")
             addOption("--embed-metadata")
             when (format) {
@@ -505,6 +525,9 @@ class DownloadService : Service() {
             cookies?.delete()
         }
     }
+
+    /** Nombre de archivo seguro: "Artista - Canción". */
+    private fun safeName(s: String) = s.replace(Regex("[\\/:*?\"<>|%]"), "_").trim().take(120).ifEmpty { "cancion" }
 
     private fun onLine(item: VideoItem, p: Float, eta: Long, line: String) {
         val newPhase = when {

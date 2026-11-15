@@ -41,7 +41,12 @@ enum class Platform(
     FACEBOOK("Facebook", listOf("facebook.com", "fb.watch", "fb.com"),
         "https://m.facebook.com/login/", ".facebook.com",
         intArrayOf(0xFF0A5BD8.toInt(), 0xFF1877F2.toInt(), 0xFF42A5F5.toInt(), 0xFF6C5CE7.toInt(), 0xFF0A5BD8.toInt()),
-        0xFF1877F2.toInt());
+        0xFF1877F2.toInt()),
+    // Spotify: se lee la lista y cada canción se busca en YouTube (la verificación, si hace falta, es la de YouTube).
+    SPOTIFY("Spotify", listOf("open.spotify.com", "spotify.link", "spoti.fi"),
+        "https://m.youtube.com/", ".youtube.com",
+        intArrayOf(0xFF0B3D20.toInt(), 0xFF127A3B.toInt(), 0xFF1DB954.toInt(), 0xFF1ED760.toInt(), 0xFF0B3D20.toInt()),
+        0xFF1DB954.toInt());
 
     companion object {
         fun detect(url: String?): Platform? {

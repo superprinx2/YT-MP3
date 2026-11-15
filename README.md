@@ -1,6 +1,6 @@
 # YT-MP3
 
-Descarga música y videos de **YouTube, TikTok, Instagram y Facebook** sin anuncios, en Android (y YouTube en Windows).
+Descarga música y videos de **YouTube, TikTok, Instagram, Facebook y Spotify** sin anuncios, en Android (y YouTube en Windows).
 Por dentro usa [yt-dlp](https://github.com/yt-dlp/yt-dlp) + FFmpeg: todo se procesa en tu equipo, sin pasar por servidores de terceros.
 
 <p align="center">
@@ -22,10 +22,13 @@ Todas las versiones están en [Releases](https://github.com/superprinx2/YT-MP3/r
 
 ## Funciones
 
-- **Cuatro plataformas** con pestañas: **YouTube**, **TikTok**, **Instagram** y **Facebook**. Al pegar un enlace la app cambia sola de pestaña.
+- **Cinco plataformas** con pestañas: **YouTube**, **TikTok**, **Instagram**, **Facebook** y **Spotify**. Al pegar un enlace la app cambia sola de pestaña.
 - **TikTok**: video MP4 **sin marca de agua** o solo el audio en MP3.
 - **Instagram**: reels y videos de publicaciones en MP4 o MP3.
 - **Facebook**: videos y reels públicos en MP4 o MP3.
+- **Spotify**: playlists, álbumes y canciones en MP3. El audio de Spotify está protegido (DRM), así que la app
+  lee la lista de canciones y baja cada una desde YouTube, eligiendo la versión cuya duración coincide.
+  Spotify muestra hasta 100 canciones por enlace.
 - **No hace falta iniciar sesión.** Solo si una plataforma lo exige (o pide «confirma que no eres un robot»),
   la app pausa, te avisa y te deja hacerlo dentro de la app; queda guardado solo en el teléfono.
 - Pega un enlace de **video o playlist** (o usa **Compartir → YT MP3** desde YouTube, TikTok, Instagram o Facebook).

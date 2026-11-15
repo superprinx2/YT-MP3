@@ -87,6 +87,8 @@ class VerifyActivity : AppCompatActivity() {
                     "Cuando veas tu inicio de Instagram, toca «Listo». Tus datos solo se guardan en este teléfono."
                 Platform.TIKTOK -> "Si TikTok muestra una verificación, resuélvela aquí. Iniciar sesión es opcional. " +
                     "Luego toca «Listo»."
+                Platform.SPOTIFY -> "Las canciones de Spotify se buscan en YouTube. Si YouTube muestra una verificación, " +
+                    "resuélvela aquí y toca «Listo»."
                 Platform.FACEBOOK -> "Inicia sesión en Facebook solo si el video no es público o Facebook lo pide. " +
                     "Cuando termines, toca «Listo». Tus datos solo se guardan en este teléfono."
             }

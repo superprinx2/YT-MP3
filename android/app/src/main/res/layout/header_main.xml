@@ -231,6 +231,34 @@
                 android:textColor="@color/ios_label"
                 android:textSize="12sp" />
         </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tabSpotify"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="@drawable/bg_platform_tab"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageView
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:background="@drawable/bg_tab_spotify"
+                android:importantForAccessibility="no"
+                android:padding="6dp"
+                android:src="@drawable/ic_tab_waves" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:fontFamily="@font/inter_semibold"
+                android:maxLines="1"
+                android:text="Spotify"
+                android:textColor="@color/ios_label"
+                android:textSize="12sp" />
+        </LinearLayout>
     </LinearLayout>
 
     <!-- Campo de búsqueda tipo iOS -->

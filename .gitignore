@@ -19,3 +19,8 @@ android/.idea/
 # Python
 __pycache__/
 *.pyc
+
+# Video promocional: herramientas y temporales (pesados)
+promo/tools/
+promo/test/
+promo/build/
