@@ -26,7 +26,7 @@ object Updater {
     const val BUNDLED = "2026.10.26"
 
     private const val TAG = "YTMP3"
-    private const val UA = "YT-MP3-Android/1.1"
+    private const val UA = "MegaDown-Android/1.6"
     private val mutex = Mutex()
 
     private fun ytdlpDir(ctx: Context) = File(File(ctx.noBackupFilesDir, "youtubedl-android"), "yt-dlp")

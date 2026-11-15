@@ -59,7 +59,7 @@ object Cookies {
             }
         }
         if (lines.isEmpty()) return 0
-        file(ctx).writeText("# Netscape HTTP Cookie File\n# Generado por YT MP3\n" + lines.joinToString("\n") + "\n")
+        file(ctx).writeText("# Netscape HTTP Cookie File\n# Generado por MegaDown\n" + lines.joinToString("\n") + "\n")
         return lines.size
     }
 

@@ -87,12 +87,22 @@ class SettingsActivity : AppCompatActivity() {
             setPadding(0, 0, 0, dp(4f))
         })
 
+        buildSupport()
         buildSpeed()
         buildBackground()
         buildVerification()
         buildStats()
         buildYtdlp()
         buildAbout()
+    }
+
+    private fun buildSupport() {
+        header("Apoya MegaDown")
+        val card = card()
+        card.addView(row("🍔", "Tengo hambre · invítame un menú", "Donar", valueColor = R.color.ios_orange,
+            position = Pos.SINGLE) { Donate.show(this) })
+        content.addView(card)
+        footer("MegaDown es gratis y sin anuncios. Puedes apoyarla con Yape, Plin o una transferencia al BCP.")
     }
 
     private fun buildSpeed() {
@@ -262,7 +272,7 @@ class SettingsActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(dp(84f), dp(84f))
         })
         box.addView(TextView(this).apply {
-            text = "YT MP3"; typeface = bold; textSize = 22f; setTextColor(color(R.color.ios_label))
+            text = "MegaDown"; typeface = bold; textSize = 22f; setTextColor(color(R.color.ios_label))
             setPadding(0, dp(12f), 0, 0)
         })
         val v = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: "?"

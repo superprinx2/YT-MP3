@@ -77,13 +77,15 @@ class MainActivity : AppCompatActivity() {
         h = HeaderMainBinding.inflate(layoutInflater, b.list, false)
         adapter = VideoAdapter(DownloadState.items) { updateCount() }
         b.list.adapter = ConcatAdapter(HeaderAdapter(h.root), adapter,
-            FooterAdapter { SettingsActivity.copyHandle(this, it) })
+            FooterAdapter({ SettingsActivity.copyHandle(this, it) }, { it.haptic(); Donate.show(this) }))
         b.list.itemAnimator = null
 
         // --- interacción
         listOf(h.btnAnalyze, h.btnPaste, h.btnSettings, h.modeChip, h.rowFolder, h.rowQuality, b.btnCancel)
             .forEach { it.pressable(0.96f) }
         h.logo.setOnClickListener { it.haptic(); it.bounce() }
+        h.btnDonate.pressable(0.92f)
+        h.btnDonate.setOnClickListener { it.haptic(); Donate.show(this) }
         h.btnPaste.setOnClickListener {
             it.haptic()
             val clip = getSystemService(ClipboardManager::class.java).primaryClip
@@ -188,6 +190,27 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         showHero()
+        h.btnDonate.postDelayed(donateWiggle, 6000)
+    }
+
+    override fun onPause() {
+        h.btnDonate.removeCallbacks(donateWiggle)
+        super.onPause()
+    }
+
+    /** El botón "Tengo hambre" rebota de vez en cuando para llamar la atención. */
+    private val donateWiggle = object : Runnable {
+        override fun run() {
+            if (!DownloadState.running) {
+                h.btnDonate.animate().rotation(-6f).setDuration(80).withEndAction {
+                    h.btnDonate.animate().rotation(6f).setDuration(80).withEndAction {
+                        h.btnDonate.animate().rotation(0f).setDuration(80).start()
+                    }.start()
+                }.start()
+                h.btnDonate.bounce()
+            }
+            h.btnDonate.postDelayed(this, 12000)
+        }
     }
 
     override fun onStop() {
@@ -231,7 +254,7 @@ class MainActivity : AppCompatActivity() {
         if (DownloadState.items.isEmpty() && !analyzing) {
             h.infoText.visibility = View.VISIBLE
             h.infoText.text = when (p) {
-                Platform.YOUTUBE -> "También puedes tocar «Compartir» en la app de YouTube y elegir YT MP3."
+                Platform.YOUTUBE -> "También puedes tocar «Compartir» en la app de YouTube y elegir MegaDown."
                 Platform.TIKTOK -> "Videos sin marca de agua en MP4, o solo el audio en MP3. También funciona «Compartir» desde TikTok."
                 Platform.INSTAGRAM -> "Reels y videos de publicaciones en MP4 o MP3. También funciona «Compartir» desde Instagram. " +
                     "Si Instagram pidiera iniciar sesión, te avisaremos."
@@ -426,7 +449,7 @@ class MainActivity : AppCompatActivity() {
             MaterialAlertDialogBuilder(this)
                 .setTitle("Descargar con la pantalla bloqueada")
                 .setMessage("Para que las descargas sigan aunque bloquees el celular, " +
-                    "permite que YT MP3 funcione sin restricciones de batería.")
+                    "permite que MegaDown funcione sin restricciones de batería.")
                 .setPositiveButton("Permitir") { _, _ ->
                     SettingsActivity.requestBatteryExemption(this); launchService(tree)
                 }

@@ -1,4 +1,4 @@
-# YT-MP3
+# MegaDown
 
 Descarga música y videos de **YouTube, TikTok, Instagram, Facebook y Spotify** sin anuncios, en Android (y YouTube en Windows).
 Por dentro usa [yt-dlp](https://github.com/yt-dlp/yt-dlp) + FFmpeg: todo se procesa en tu equipo, sin pasar por servidores de terceros.
@@ -13,9 +13,9 @@ Por dentro usa [yt-dlp](https://github.com/yt-dlp/yt-dlp) + FFmpeg: todo se proc
 
 | APK | Para | Enlace directo |
 |---|---|---|
-| **arm64** (recomendado) | La mayoría de teléfonos desde 2017 | [YT-MP3-arm64.apk](https://github.com/superprinx2/YT-MP3/releases/latest/download/YT-MP3-arm64.apk) |
-| armv7 | Teléfonos antiguos de 32 bits | [YT-MP3-armv7.apk](https://github.com/superprinx2/YT-MP3/releases/latest/download/YT-MP3-armv7.apk) |
-| universal | Cualquier dispositivo (más pesado) | [YT-MP3-universal.apk](https://github.com/superprinx2/YT-MP3/releases/latest/download/YT-MP3-universal.apk) |
+| **arm64** (recomendado) | La mayoría de teléfonos desde 2017 | [MegaDown-arm64.apk](https://github.com/superprinx2/YT-MP3/releases/latest/download/MegaDown-arm64.apk) |
+| armv7 | Teléfonos antiguos de 32 bits | [MegaDown-armv7.apk](https://github.com/superprinx2/YT-MP3/releases/latest/download/MegaDown-armv7.apk) |
+| universal | Cualquier dispositivo (más pesado) | [MegaDown-universal.apk](https://github.com/superprinx2/YT-MP3/releases/latest/download/MegaDown-universal.apk) |
 
 Ábrelo en el teléfono y acepta **«Instalar apps desconocidas»**. Requiere Android 8.0 o superior.
 Todas las versiones están en [Releases](https://github.com/superprinx2/YT-MP3/releases).

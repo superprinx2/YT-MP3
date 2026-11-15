@@ -652,7 +652,7 @@ class DownloadService : Service() {
         getSystemService(NotificationManager::class.java).notify(NOTIF_DONE,
             NotificationCompat.Builder(this, App.CHANNEL_DONE)
                 .setSmallIcon(R.drawable.ic_stat_download)
-                .setContentTitle("YT MP3")
+                .setContentTitle("MegaDown")
                 .setContentText(msg)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(msg))
                 .setContentIntent(openAppIntent())

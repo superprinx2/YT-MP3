@@ -127,10 +127,13 @@ class HeaderAdapter(private val view: View) : RecyclerView.Adapter<RecyclerView.
 }
 
 /** Créditos al final de la lista. */
-class FooterAdapter(private val onCredit: (View) -> Unit) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+class FooterAdapter(private val onCredit: (View) -> Unit, private val onDonate: (View) -> Unit = {}) :
+    RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
         val b = ItemFooterBinding.inflate(LayoutInflater.from(parent.context), parent, false)
         b.credit.setOnClickListener(onCredit)
+        b.donate.pressable(0.94f)
+        b.donate.setOnClickListener(onDonate)
         return object : RecyclerView.ViewHolder(b.root) {}
     }
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {}
