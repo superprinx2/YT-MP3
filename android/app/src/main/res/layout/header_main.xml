@@ -110,11 +110,109 @@
         </LinearLayout>
     </FrameLayout>
 
+    <!-- Selector de plataforma -->
+    <LinearLayout
+        android:id="@+id/platformBar"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:layout_marginTop="14dp"
+        android:background="@drawable/bg_platform_bar"
+        android:orientation="horizontal"
+        android:padding="4dp">
+
+        <LinearLayout
+            android:id="@+id/tabYoutube"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="@drawable/bg_platform_tab"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingHorizontal="6dp">
+
+            <ImageView
+                android:layout_width="26dp"
+                android:layout_height="26dp"
+                android:background="@drawable/bg_tab_youtube"
+                android:importantForAccessibility="no"
+                android:padding="5dp"
+                android:src="@drawable/ic_tab_play" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="7dp"
+                android:fontFamily="@font/inter_semibold"
+                android:maxLines="1"
+                android:text="YouTube"
+                android:textColor="@color/ios_label"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tabTiktok"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="@drawable/bg_platform_tab"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingHorizontal="6dp">
+
+            <ImageView
+                android:layout_width="26dp"
+                android:layout_height="26dp"
+                android:background="@drawable/bg_tab_tiktok"
+                android:importantForAccessibility="no"
+                android:padding="5dp"
+                android:src="@drawable/ic_tab_note" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="7dp"
+                android:fontFamily="@font/inter_semibold"
+                android:maxLines="1"
+                android:text="TikTok"
+                android:textColor="@color/ios_label"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tabInstagram"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="@drawable/bg_platform_tab"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingHorizontal="6dp">
+
+            <ImageView
+                android:layout_width="26dp"
+                android:layout_height="26dp"
+                android:background="@drawable/bg_tab_instagram"
+                android:importantForAccessibility="no"
+                android:padding="5dp"
+                android:src="@drawable/ic_tab_camera" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="7dp"
+                android:fontFamily="@font/inter_semibold"
+                android:maxLines="1"
+                android:text="Instagram"
+                android:textColor="@color/ios_label"
+                android:textSize="14sp" />
+        </LinearLayout>
+    </LinearLayout>
+
     <!-- Campo de búsqueda tipo iOS -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="48dp"
-        android:layout_marginTop="16dp"
+        android:layout_marginTop="12dp"
         android:background="@drawable/bg_field"
         android:gravity="center_vertical"
         android:orientation="horizontal"
@@ -195,6 +293,58 @@
         android:text="También puedes tocar «Compartir» en la app de YouTube y elegir YT MP3."
         android:textColor="@color/ios_secondary"
         android:textSize="14sp" />
+
+    <!-- Instagram: iniciar sesión -->
+    <LinearLayout
+        android:id="@+id/loginCard"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:background="@drawable/bg_login_card"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="12dp"
+        android:visibility="gone">
+
+        <ImageView
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:background="@drawable/bg_tab_instagram"
+            android:importantForAccessibility="no"
+            android:padding="7dp"
+            android:src="@drawable/ic_tab_camera" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/loginTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="@font/inter_semibold"
+                android:text="Inicia sesión en Instagram"
+                android:textColor="@color/ios_label"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/loginText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Instagram casi siempre lo pide para descargar. Solo una vez; queda guardado en tu teléfono."
+                android:textColor="@color/ios_secondary"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <ImageView
+            android:layout_width="14dp"
+            android:layout_height="14dp"
+            android:importantForAccessibility="no"
+            android:src="@drawable/ic_chevron" />
+    </LinearLayout>
 
     <!-- Formato: control segmentado -->
     <TextView

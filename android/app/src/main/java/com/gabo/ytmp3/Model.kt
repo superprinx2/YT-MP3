@@ -17,6 +17,36 @@ enum class Format(val ext: String, val mime: String) {
 
 enum class Status { PENDING, DOWNLOADING, DONE, ERROR }
 
+/** Plataformas soportadas. Todas usan yt-dlp por dentro. */
+enum class Platform(
+    val label: String,
+    val hosts: List<String>,
+    val verifyUrl: String,
+    val cookieDomain: String,
+    val palette: IntArray,
+    val accent: Int,
+) {
+    YOUTUBE("YouTube", listOf("youtube.com", "youtu.be", "youtube-nocookie.com"),
+        "https://m.youtube.com/", ".youtube.com",
+        intArrayOf(0xFFFF2D55.toInt(), 0xFFFF375F.toInt(), 0xFFFF6B3D.toInt(), 0xFFAF52DE.toInt(), 0xFFFF2D55.toInt()),
+        0xFFFF2D55.toInt()),
+    TIKTOK("TikTok", listOf("tiktok.com"),
+        "https://www.tiktok.com/login", ".tiktok.com",
+        intArrayOf(0xFF111114.toInt(), 0xFF1E3A5F.toInt(), 0xFF00B8C4.toInt(), 0xFFFE2C55.toInt(), 0xFF111114.toInt()),
+        0xFF00B8C4.toInt()),
+    INSTAGRAM("Instagram", listOf("instagram.com", "instagr.am"),
+        "https://www.instagram.com/accounts/login/", ".instagram.com",
+        intArrayOf(0xFFFEDA75.toInt(), 0xFFFA7E1E.toInt(), 0xFFD62976.toInt(), 0xFF962FBF.toInt(), 0xFF4F5BD5.toInt()),
+        0xFFD62976.toInt());
+
+    companion object {
+        fun detect(url: String?): Platform? {
+            val host = url?.let { runCatching { Uri.parse(it).host }.getOrNull() }?.lowercase() ?: return null
+            return entries.firstOrNull { p -> p.hosts.any { host == it || host.endsWith(".$it") } }
+        }
+    }
+}
+
 /** Modos de velocidad. ULTRA calcula el máximo según el celular. */
 enum class SpeedMode(val label: String) { NORMAL("Normal"), FAST("Rápido"), ULTRA("Ultra") }
 
@@ -26,6 +56,9 @@ class VideoItem(
     val url: String,
     val duration: Double?,
     var checked: Boolean = true,
+    val platform: Platform = Platform.YOUTUBE,
+    val thumbUrl: String? = null,
+    val uploader: String? = null,
 ) {
     @Volatile var status: Status = Status.PENDING
     @Volatile var progress: Float = 0f
@@ -35,8 +68,8 @@ class VideoItem(
     @Volatile var speedBps: Double = 0.0
     @Volatile var etaSec: Long = -1
 
-    val thumbnail: String get() = "https://i.ytimg.com/vi/$id/mqdefault.jpg"
-    val thumbnailHq: String get() = "https://i.ytimg.com/vi/$id/hqdefault.jpg"
+    val thumbnail: String? get() = thumbUrl ?: if (platform == Platform.YOUTUBE) "https://i.ytimg.com/vi/$id/mqdefault.jpg" else null
+    val thumbnailHq: String? get() = if (platform == Platform.YOUTUBE) "https://i.ytimg.com/vi/$id/hqdefault.jpg" else thumbUrl
 }
 
 /**
@@ -61,7 +94,8 @@ object DownloadState {
     var concurrency = 1                       // descargas simultáneas en este momento
     var mode = SpeedMode.NORMAL
     var notice: String? = null                // avisos: calor, batería, datos móviles…
-    var needsVerification = false             // YouTube pidió "no soy un robot"
+    var needsVerification = false             // YouTube pidió "no soy un robot" o Instagram pide sesión
+    var verifyPlatform = Platform.YOUTUBE
     var totalEtaSec = -1L
     var perMinute = 0.0                       // canciones terminadas por minuto
     var celebrate = false                     // dispara el confeti una vez
@@ -87,6 +121,10 @@ class Prefs(ctx: Context) {
     var treeUri: Uri?
         get() = sp.getString("tree_uri", null)?.let(Uri::parse)
         set(v) = sp.edit().putString("tree_uri", v?.toString()).apply()
+
+    var platform: Platform
+        get() = runCatching { Platform.valueOf(sp.getString("platform", "YOUTUBE")!!) }.getOrDefault(Platform.YOUTUBE)
+        set(v) = sp.edit().putString("platform", v.name).apply()
 
     var format: Format
         get() = runCatching { Format.valueOf(sp.getString("format", "MP3")!!) }.getOrDefault(Format.MP3)
@@ -234,6 +272,13 @@ object Util {
         return n * mult
     }
 
+    /** ¿La plataforma exige iniciar sesión (típico de Instagram)? */
+    fun needsLogin(err: String?): Boolean {
+        val e = err?.lowercase() ?: return false
+        return listOf("empty media response", "login required", "locked behind the login",
+            "--cookies", "rate-limit reached", "log in to", "requested content is not available").any { it in e }
+    }
+
     /** ¿YouTube está pidiendo "confirma que no eres un robot"? */
     fun isBotCheck(err: String?): Boolean {
         val e = err?.lowercase() ?: return false
@@ -246,14 +291,37 @@ object Util {
         text?.let { Regex("""https?://\S+""").find(it)?.value?.trimEnd('.', ',', ')') }
 
     /** Convierte la salida de `yt-dlp --flat-playlist -J` en una lista de videos. */
-    fun parseInfo(json: String): Triple<String, Boolean, List<VideoItem>> {
+    private fun thumbOf(o: JSONObject): String? {
+        o.optString("thumbnail").takeIf { it.startsWith("http") }?.let { return it }
+        val arr = o.optJSONArray("thumbnails") ?: return null
+        for (i in arr.length() - 1 downTo 0) {
+            val u = arr.optJSONObject(i)?.optString("url") ?: continue
+            if (u.startsWith("http")) return u
+        }
+        return null
+    }
+
+    /** Título legible: los de TikTok/Instagram son descripciones largas con hashtags. */
+    private fun cleanTitle(raw: String, uploader: String?, platform: Platform): String {
+        if (platform == Platform.YOUTUBE) return raw
+        val noTags = raw.replace(Regex("\\s*#\\S+"), "").trim().take(90)
+        return when {
+            noTags.isNotEmpty() && !noTags.startsWith("Video by") -> noTags
+            !uploader.isNullOrEmpty() -> "Video de @$uploader"
+            else -> raw.take(90)
+        }
+    }
+
+    fun parseInfo(json: String, platform: Platform = Platform.YOUTUBE): Triple<String, Boolean, List<VideoItem>> {
         val o = JSONObject(json)
         val entries = o.optJSONArray("entries")
         if (entries == null) {
             val id = o.optString("id")
             val url = o.optString("webpage_url").ifEmpty { o.optString("original_url") }
-            val item = VideoItem(id, o.optString("title", id), url,
-                o.optDouble("duration").takeIf { !it.isNaN() })
+            val up = o.optString("uploader").ifEmpty { o.optString("channel") }.ifEmpty { null }
+            val item = VideoItem(id, cleanTitle(o.optString("title", id), up, platform), url,
+                o.optDouble("duration").takeIf { !it.isNaN() },
+                platform = platform, thumbUrl = thumbOf(o), uploader = up)
             return Triple(item.title, false, listOf(item))
         }
         val list = ArrayList<VideoItem>(entries.length())
@@ -261,12 +329,16 @@ object Util {
             val e = entries.optJSONObject(i) ?: continue
             val id = e.optString("id")
             if (id.isEmpty()) continue
-            var url = e.optString("url")
-            if (!url.startsWith("http")) url = "https://www.youtube.com/watch?v=$id"
-            val title = e.optString("title").ifEmpty { id }
+            var url = e.optString("url").ifEmpty { e.optString("webpage_url") }
+            if (!url.startsWith("http")) {
+                if (platform != Platform.YOUTUBE) continue
+                url = "https://www.youtube.com/watch?v=$id"
+            }
+            val up = e.optString("uploader").ifEmpty { null }
+            val title = cleanTitle(e.optString("title").ifEmpty { id }, up, platform)
             val unavailable = title == "[Private video]" || title == "[Deleted video]"
             list += VideoItem(id, title, url, e.optDouble("duration").takeIf { !it.isNaN() },
-                checked = !unavailable)
+                checked = !unavailable, platform = platform, thumbUrl = thumbOf(e), uploader = up)
         }
         return Triple(o.optString("title", "Playlist"), true, list)
     }

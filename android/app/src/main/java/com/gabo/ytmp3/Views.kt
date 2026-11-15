@@ -63,9 +63,20 @@ fun View.bounce() {
  * que flotan hacia arriba.
  */
 class HeroView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = null) : View(ctx, attrs) {
-    private val colors = intArrayOf(
-        Color.parseColor("#FF2D55"), Color.parseColor("#FF375F"),
-        Color.parseColor("#FF6B3D"), Color.parseColor("#AF52DE"), Color.parseColor("#FF2D55"))
+    private var colors = Platform.YOUTUBE.palette
+
+    /** Cambia los colores del degradado (uno por plataforma) con un fundido suave. */
+    fun setPalette(p: IntArray) {
+        if (p.contentEquals(colors)) return
+        colors = p
+        if (width > 0) {
+            shader = LinearGradient(0f, 0f, width * 2f, height.toFloat(), colors, null, Shader.TileMode.MIRROR)
+            bg.shader = shader
+            alpha = 0.6f
+            animate().alpha(1f).setDuration(350).start()
+            invalidate()
+        }
+    }
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
     private val notePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE

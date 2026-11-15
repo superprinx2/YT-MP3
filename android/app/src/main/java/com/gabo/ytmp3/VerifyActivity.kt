@@ -29,6 +29,16 @@ import androidx.core.content.res.ResourcesCompat
 class VerifyActivity : AppCompatActivity() {
 
     private lateinit var web: WebView
+    private val platform by lazy {
+        runCatching { Platform.valueOf(intent.getStringExtra(EXTRA_PLATFORM) ?: "") }.getOrDefault(Platform.YOUTUBE)
+    }
+
+    companion object {
+        const val EXTRA_PLATFORM = "platform"
+
+        fun intent(ctx: android.content.Context, p: Platform) =
+            android.content.Intent(ctx, VerifyActivity::class.java).putExtra(EXTRA_PLATFORM, p.name)
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -56,7 +66,10 @@ class VerifyActivity : AppCompatActivity() {
         }
         bar.addView(barButton("Cancelar", false, Gravity.START) { setResult(RESULT_CANCELED); finish() })
         bar.addView(TextView(this).apply {
-            text = "Verificación"
+            text = when (platform) {
+                Platform.YOUTUBE -> "Verificación"
+                else -> platform.label
+            }
             typeface = semibold
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
             setTextColor(ContextCompat.getColor(this@VerifyActivity, R.color.ios_label))
@@ -67,8 +80,14 @@ class VerifyActivity : AppCompatActivity() {
         root.addView(bar)
 
         root.addView(TextView(this).apply {
-            text = "Si YouTube muestra una verificación o un captcha, resuélvelo aquí. " +
-                "Si te pide iniciar sesión, puedes hacerlo. Cuando veas YouTube normal, toca «Listo»."
+            text = when (platform) {
+                Platform.YOUTUBE -> "Si YouTube muestra una verificación o un captcha, resuélvelo aquí. " +
+                    "Si te pide iniciar sesión, puedes hacerlo. Cuando veas YouTube normal, toca «Listo»."
+                Platform.INSTAGRAM -> "Inicia sesión en Instagram (te recomendamos una cuenta secundaria). " +
+                    "Cuando veas tu inicio de Instagram, toca «Listo». Tus datos solo se guardan en este teléfono."
+                Platform.TIKTOK -> "Si TikTok muestra una verificación, resuélvela aquí. Iniciar sesión es opcional. " +
+                    "Luego toca «Listo»."
+            }
             setTextColor(ContextCompat.getColor(this@VerifyActivity, R.color.ios_secondary))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             setPadding(dp(16f), 0, dp(16f), dp(8f))
@@ -100,7 +119,7 @@ class VerifyActivity : AppCompatActivity() {
         root.addView(web)
 
         setContentView(root)
-        web.loadUrl(intent.getStringExtra("url") ?: "https://m.youtube.com/")
+        web.loadUrl(platform.verifyUrl)
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -110,12 +129,17 @@ class VerifyActivity : AppCompatActivity() {
     }
 
     private fun done() {
+        if (platform == Platform.INSTAGRAM && !Cookies.webViewHasInstagramSession()) {
+            Toast.makeText(this, "Aún no has iniciado sesión en Instagram.", Toast.LENGTH_LONG).show()
+            return
+        }
         val n = Cookies.exportFromWebView(this)
         if (n == 0) {
             Toast.makeText(this, "Aún no hay datos de YouTube. Espera a que cargue la página.", Toast.LENGTH_LONG).show()
             return
         }
-        Toast.makeText(this, "Verificación guardada ✓", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, if (platform == Platform.INSTAGRAM) "Sesión de Instagram guardada ✓"
+                             else "Verificación guardada ✓", Toast.LENGTH_SHORT).show()
         setResult(RESULT_OK)
         finish()
     }

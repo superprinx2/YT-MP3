@@ -1,6 +1,6 @@
 # YT-MP3
 
-Descarga música y videos de YouTube **sin anuncios**, en Android y en Windows.
+Descarga música y videos de **YouTube, TikTok e Instagram** sin anuncios, en Android (y YouTube en Windows).
 Por dentro usa [yt-dlp](https://github.com/yt-dlp/yt-dlp) + FFmpeg: todo se procesa en tu equipo, sin pasar por servidores de terceros.
 
 <p align="center">
@@ -22,7 +22,11 @@ Todas las versiones están en [Releases](https://github.com/superprinx2/YT-MP3/r
 
 ## Funciones
 
-- Pega un enlace de **video o playlist** (o usa **Compartir → YT MP3** desde la app de YouTube).
+- **Tres plataformas** con pestañas: **YouTube**, **TikTok** e **Instagram**. Al pegar un enlace la app cambia sola de pestaña.
+- **TikTok**: video MP4 **sin marca de agua** o solo el audio en MP3.
+- **Instagram**: reels y videos de publicaciones en MP4 o MP3. Instagram casi siempre exige **iniciar sesión**:
+  se hace una vez dentro de la app y queda guardado solo en el teléfono (recomendado: cuenta secundaria).
+- Pega un enlace de **video o playlist** (o usa **Compartir → YT MP3** desde la app de YouTube, TikTok o Instagram).
 - **MP3** (audio, con portada y etiquetas) o **MP4** (video H.264), con selección de calidad.
 - **Playlists completas**: detecta todos los videos, eliges cuáles con casillas y los baja todos.
 - **Modo Ultra ⚡**: varias descargas a la vez según la memoria y núcleos del teléfono (hasta 8).
@@ -33,6 +37,11 @@ Todas las versiones están en [Releases](https://github.com/superprinx2/YT-MP3/r
   te deja resolverlo dentro de la app; luego reanuda.
 - Actualiza yt-dlp automáticamente y reintenta con otros clientes para evitar errores `HTTP 403`.
 - Interfaz estilo iOS con modo claro/oscuro, miniaturas, gráficos de velocidad y estadísticas.
+
+<p align="center">
+  <img src="docs/img/android_tiktok.png" width="240" alt="Video de TikTok sin marca de agua">
+  <img src="docs/img/android_instagram.png" width="240" alt="Pestaña de Instagram con inicio de sesión">
+</p>
 
 <p align="center">
   <img src="docs/img/android_progreso.png" width="300" alt="Progreso con protección de calor">

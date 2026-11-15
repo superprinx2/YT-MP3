@@ -158,26 +158,38 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun buildVerification() {
-        header("Verificación de YouTube")
+        header("Cuentas y verificación")
         val card = card()
-        val has = Cookies.has(this)
-        card.addView(row("🛡️", "Verificar / iniciar sesión", if (has) "Guardada ✓" else "",
+        val yt = Cookies.has(this, Platform.YOUTUBE)
+        val ig = Cookies.has(this, Platform.INSTAGRAM)
+        val tt = Cookies.has(this, Platform.TIKTOK)
+        card.addView(row("▶️", "YouTube: verificar", if (yt) "Guardada ✓" else "",
             valueColor = R.color.ios_green, position = Pos.TOP) {
-            verify.launch(Intent(this, VerifyActivity::class.java))
+            verify.launch(VerifyActivity.intent(this, Platform.YOUTUBE))
         })
         card.addView(separator(52))
-        card.addView(row("📄", "Importar cookies.txt", "", position = if (has) Pos.MID else Pos.BOTTOM) {
+        card.addView(row("📸", "Instagram: iniciar sesión", if (ig) "Conectado ✓" else "Recomendado",
+            valueColor = if (ig) R.color.ios_green else R.color.ios_secondary, position = Pos.MID) {
+            verify.launch(VerifyActivity.intent(this, Platform.INSTAGRAM))
+        })
+        card.addView(separator(52))
+        card.addView(row("🎵", "TikTok: verificar (opcional)", if (tt) "Guardada ✓" else "",
+            valueColor = R.color.ios_green, position = Pos.MID) {
+            verify.launch(VerifyActivity.intent(this, Platform.TIKTOK))
+        })
+        card.addView(separator(52))
+        card.addView(row("📄", "Importar cookies.txt", "", position = if (Cookies.has(this)) Pos.MID else Pos.BOTTOM) {
             importCookies.launch(arrayOf("text/plain", "*/*"))
         })
-        if (has) {
+        if (Cookies.has(this)) {
             card.addView(separator(52))
-            card.addView(row("🗑️", "Borrar verificación", "", labelColor = R.color.ios_red, position = Pos.BOTTOM) {
-                Cookies.clear(this); toast("Verificación borrada"); build()
+            card.addView(row("🗑️", "Cerrar sesiones y borrar datos", "", labelColor = R.color.ios_red, position = Pos.BOTTOM) {
+                Cookies.clear(this); toast("Sesiones y verificaciones borradas"); build()
             })
         }
         content.addView(card)
-        footer("Si YouTube pide «confirma que no eres un robot», la app pausa las descargas y te avisa. " +
-            "Resuélvelo aquí y se reanudan. Los datos solo se guardan en tu teléfono.")
+        footer("Si YouTube pide «confirma que no eres un robot» o Instagram pide iniciar sesión, la app pausa " +
+            "las descargas y te avisa. Los datos solo se guardan en tu teléfono. Para Instagram te recomendamos una cuenta secundaria.")
     }
 
     private fun buildStats() {

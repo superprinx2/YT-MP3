@@ -334,21 +334,30 @@ class DownloadService : Service() {
     // ------------------------------------------------------------------ verificación "no soy un robot"
     /** Pausa la cola para que el usuario verifique. false = ya se intentó demasiadas veces. */
     private fun requestVerification(item: VideoItem): Boolean {
+        val p = item.platform
         synchronized(this) {
             if (verifyPaused) return true
-            botBackoffUntil = SystemClock.elapsedRealtime() + 5 * 60 * 1000
+            if (p == Platform.YOUTUBE) botBackoffUntil = SystemClock.elapsedRealtime() + 5 * 60 * 1000
             if (verifyCount >= 3) {
                 // Ya verificó varias veces y sigue bloqueado: no insistir, marcar error.
-                item.error = "YouTube sigue bloqueando. Prueba más tarde o con otra red."
+                item.error = if (p == Platform.INSTAGRAM) "Instagram no permite descargar este contenido con tu sesión."
+                             else "${p.label} sigue bloqueando. Prueba más tarde o con otra red."
                 return false
             }
             verifyCount++
             verifyPaused = true
         }
         killAll()   // las demás descargas también fallarían; se reintentan tras verificar
-        DownloadState.post { needsVerification = true; phase = "En pausa: YouTube pide verificar que no eres un robot" }
-        alert("YouTube pide verificación",
-            "Toca para resolver la verificación y continuar con las descargas.", openVerify = true)
+        val (phaseMsg, title, text) = when (p) {
+            Platform.INSTAGRAM -> Triple("En pausa: Instagram pide iniciar sesión",
+                "Instagram pide iniciar sesión", "Toca para iniciar sesión y continuar con las descargas.")
+            Platform.TIKTOK -> Triple("En pausa: TikTok pide verificación",
+                "TikTok pide verificación", "Toca para resolverlo y continuar con las descargas.")
+            Platform.YOUTUBE -> Triple("En pausa: YouTube pide verificar que no eres un robot",
+                "YouTube pide verificación", "Toca para resolver la verificación y continuar con las descargas.")
+        }
+        DownloadState.post { needsVerification = true; verifyPlatform = p; phase = phaseMsg }
+        alert(title, text, openVerify = true)
         return true
     }
 
@@ -363,8 +372,9 @@ class DownloadService : Service() {
 
         // Intentos: cliente por defecto y, si YouTube responde 403 u otro error, clientes
         // alternativos. Si todos fallan, se fuerza una actualización de yt-dlp y se reintenta.
-        val attempts = mutableListOf<String?>(null, "youtube:player_client=visionos,tv_simply",
-            "youtube:player_client=tv,web_safari,mweb")
+        val attempts = if (item.platform == Platform.YOUTUBE)
+            mutableListOf<String?>(null, "youtube:player_client=visionos,tv_simply", "youtube:player_client=tv,web_safari,mweb")
+        else mutableListOf<String?>(null, null)   // TikTok/Instagram: un reintento simple
         var error: String? = null
         var forcedUpdate = false
         var i = 0
@@ -380,6 +390,7 @@ class DownloadService : Service() {
                 if (error == null || hasOutput(tmp, format)) { error = null; break }
                 if (cancelRequested) return Result.CANCELLED
                 if (Util.isBotCheck(error)) return Result.BOT
+                if (item.platform != Platform.YOUTUBE && Util.needsLogin(error)) return Result.BOT
                 if (!isRetryable(error)) break
                 i++
                 if (i == attempts.size && !forcedUpdate) {
@@ -437,7 +448,13 @@ class DownloadService : Service() {
             addOption("--windows-filenames")          // nombres válidos en tarjetas SD (FAT)
             addOption("--trim-filenames", 150)
             addOption("--concurrent-fragments", 4)    // trozos en paralelo cuando el formato lo permite
-            addOption("-o", "${tmp.absolutePath}/%(title)s.%(ext)s")
+            // YouTube: título; TikTok/Instagram: autor + descripción corta (sus títulos son largos).
+            if (item.platform != Platform.YOUTUBE) {
+                // Quitar hashtags del título para que el nombre del archivo quede limpio.
+                addCommands(listOf("--replace-in-metadata", "title", "\\s*#\\S+", ""))
+            }
+            addOption("-o", if (item.platform == Platform.YOUTUBE) "${tmp.absolutePath}/%(title)s.%(ext)s"
+                            else "${tmp.absolutePath}/%(uploader,channel|video)s - %(title).60B [%(id)s].%(ext)s")
             addOption("--embed-metadata")
             when (format) {
                 Format.MP3 -> {
@@ -449,7 +466,14 @@ class DownloadService : Service() {
                 }
                 Format.MP4 -> {
                     val h = Quality.MP4_HEIGHT[quality]
-                    addOption("-S", if (h > 0) "res:$h,vcodec:h264,ext:mp4:m4a" else "vcodec:h264,ext:mp4:m4a")
+                    val res = if (h > 0) "res:$h," else ""
+                    if (item.platform == Platform.TIKTOK) {
+                        // Siempre la versión sin marca de agua; H.264 para que se vea en cualquier teléfono.
+                        addOption("-f", "b[format_note!*=atermark]/bv*[format_note!*=atermark]+ba/b")
+                        addOption("-S", "${res}vcodec:h264,br")
+                    } else {
+                        addOption("-S", "${res}vcodec:h264,ext:mp4:m4a")
+                    }
                     addOption("--merge-output-format", "mp4")
                 }
             }

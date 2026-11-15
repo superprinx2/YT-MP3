@@ -55,6 +55,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val verify = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        showLoginCard()
         if (r.resultCode != RESULT_OK) return@registerForActivityResult
         if (DownloadState.running) DownloadService.verificationDone()
         else if (analyzeAfterVerify) { analyzeAfterVerify = false; analyze() }
@@ -110,8 +111,16 @@ class MainActivity : AppCompatActivity() {
         b.btnDownload.setOnClickListener { it.haptic(true); startDownload() }
         pressScale(b.btnDownload, b.downloadFrame)
         b.btnCancel.setOnClickListener { it.haptic(); confirmCancel() }
-        b.verifyBanner.setOnClickListener { it.haptic(); openVerify() }
+        b.verifyBanner.setOnClickListener { it.haptic(); openVerify(DownloadState.verifyPlatform) }
+        h.loginCard.setOnClickListener { it.haptic(); openVerify(Platform.INSTAGRAM) }
+        h.loginCard.pressable(0.97f)
+        mapOf(h.tabYoutube to Platform.YOUTUBE, h.tabTiktok to Platform.TIKTOK, h.tabInstagram to Platform.INSTAGRAM)
+            .forEach { (v, p) ->
+                v.pressable(0.95f)
+                v.setOnClickListener { if (!DownloadState.running) { it.haptic(); setPlatform(p) } }
+            }
 
+        setPlatform(prefs.platform, animate = false)
         setFormat(prefs.format)
         showFolder()
 
@@ -168,7 +177,7 @@ class MainActivity : AppCompatActivity() {
     private fun handleIntent(intent: Intent?) {
         if (intent?.getBooleanExtra(DownloadService.EXTRA_OPEN_VERIFY, false) == true) {
             intent.removeExtra(DownloadService.EXTRA_OPEN_VERIFY)
-            openVerify()
+            openVerify(DownloadState.verifyPlatform)
             return
         }
         if (intent?.action != Intent.ACTION_SEND) return
@@ -178,7 +187,39 @@ class MainActivity : AppCompatActivity() {
         analyze()
     }
 
-    private fun openVerify() = verify.launch(Intent(this, VerifyActivity::class.java))
+    private fun openVerify(p: Platform) = verify.launch(VerifyActivity.intent(this, p))
+
+    // ------------------------------------------------------------------ plataforma
+    private fun setPlatform(p: Platform, animate: Boolean = true) {
+        prefs.platform = p
+        val tabs = mapOf(Platform.YOUTUBE to h.tabYoutube, Platform.TIKTOK to h.tabTiktok, Platform.INSTAGRAM to h.tabInstagram)
+        tabs.forEach { (tp, v) ->
+            v.isSelected = tp == p
+            v.alpha = if (tp == p) 1f else 0.7f
+        }
+        if (animate) tabs[p]?.bounce()
+        heroView?.setPalette(p.palette)
+        h.urlInput.hint = when (p) {
+            Platform.YOUTUBE -> "Pega el enlace del video o playlist"
+            Platform.TIKTOK -> "Pega el enlace del TikTok"
+            Platform.INSTAGRAM -> "Pega el enlace del reel o publicación"
+        }
+        if (DownloadState.items.isEmpty() && !analyzing) {
+            h.infoText.visibility = View.VISIBLE
+            h.infoText.text = when (p) {
+                Platform.YOUTUBE -> "También puedes tocar «Compartir» en la app de YouTube y elegir YT MP3."
+                Platform.TIKTOK -> "Videos sin marca de agua en MP4, o solo el audio en MP3. También funciona «Compartir» desde TikTok."
+                Platform.INSTAGRAM -> "Reels y videos de publicaciones en MP4 o MP3. También funciona «Compartir» desde Instagram."
+            }
+        }
+        showLoginCard()
+    }
+
+    private fun showLoginCard() {
+        if (!::h.isInitialized) return
+        h.loginCard.visibility =
+            if (prefs.platform == Platform.INSTAGRAM && !Cookies.has(this, Platform.INSTAGRAM)) View.VISIBLE else View.GONE
+    }
 
     private fun showHero() {
         val mode = prefs.speedMode
@@ -238,6 +279,9 @@ class MainActivity : AppCompatActivity() {
         }
         h.urlError.visibility = View.GONE
         getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(h.urlInput.windowToken, 0)
+        // Cambiar de pestaña sola según el enlace pegado.
+        val platform = Platform.detect(url) ?: prefs.platform
+        if (platform != prefs.platform) setPlatform(platform)
 
         analyzing = true
         h.analyzeSpinner.visibility = View.VISIBLE
@@ -263,33 +307,45 @@ class MainActivity : AppCompatActivity() {
                             if (cookies != null) req.addOption("--cookies", cookies.absolutePath)
                             req.addOption("--cache-dir", App.cacheDir(applicationContext).absolutePath)
                             // Solo necesitamos título y duración: sin resolver el JS de YouTube (mucho más rápido).
-                            if (fast) req.addOption("--extractor-args", "youtube:player_client=visionos;player_skip=configs,js")
+                            if (fast && platform == Platform.YOUTUBE)
+                                req.addOption("--extractor-args", "youtube:player_client=visionos;player_skip=configs,js")
                             return YoutubeDL.getInstance().execute(req).out
                         } finally { cookies?.delete() }
                     }
                     try { info(fast = true) } catch (e: YoutubeDL.CanceledException) { throw e }
-                    catch (e: Exception) { if (Util.isBotCheck(e.message)) throw e else info(fast = false) }
+                    catch (e: Exception) {
+                        if (Util.isBotCheck(e.message) || platform != Platform.YOUTUBE) throw e else info(fast = false)
+                    }
                 }
-                val (title, isPlaylist, list) = withContext(Dispatchers.Default) { Util.parseInfo(json) }
+                val (title, isPlaylist, list) = withContext(Dispatchers.Default) { Util.parseInfo(json, platform) }
                 DownloadState.items.clear()
                 DownloadState.items.addAll(list)
                 DownloadState.listTitle = title
                 DownloadState.isPlaylist = isPlaylist
                 DownloadState.finishedMessage = null
                 DownloadState.totalCount = 0
+                if (list.isEmpty()) throw IllegalStateException("ERROR: no se encontraron videos en ese enlace")
                 h.infoText.text = if (isPlaylist) "Playlist «$title»" else ""
                 h.infoText.visibility = if (isPlaylist) View.VISIBLE else View.GONE
                 h.listTitle.text = if (isPlaylist) "${list.size} videos" else "Video"
                 adapter.notifyDataSetChanged()
                 b.downloadFrame.postDelayed({ b.downloadFrame.bounce() }, 150)
             } catch (e: Throwable) {
-                if (Util.isBotCheck(e.message)) {
-                    h.infoText.text = "YouTube pide verificar que no eres un robot."
-                    ActionSheet.show(this@MainActivity,
-                        "YouTube pide confirmar que no eres un robot. Resuélvelo una vez y la app lo recordará.",
-                        listOf("Verificar ahora")) {
+                val login = platform != Platform.YOUTUBE && Util.needsLogin(e.message)
+                if (Util.isBotCheck(e.message) || login) {
+                    val (info, sheet, action) = when (platform) {
+                        Platform.INSTAGRAM -> Triple("Instagram pide iniciar sesión para ver este contenido.",
+                            "Instagram pide iniciar sesión. Hazlo una vez y la app lo recordará (te recomendamos una cuenta secundaria).",
+                            "Iniciar sesión en Instagram")
+                        Platform.TIKTOK -> Triple("TikTok pide verificación.",
+                            "TikTok pide verificar. Resuélvelo una vez y la app lo recordará.", "Verificar ahora")
+                        Platform.YOUTUBE -> Triple("YouTube pide verificar que no eres un robot.",
+                            "YouTube pide confirmar que no eres un robot. Resuélvelo una vez y la app lo recordará.", "Verificar ahora")
+                    }
+                    h.infoText.text = info
+                    ActionSheet.show(this@MainActivity, sheet, listOf(action)) {
                         analyzeAfterVerify = true
-                        openVerify()
+                        openVerify(platform)
                     }
                 } else {
                     val msg = e.message?.lines()?.lastOrNull { it.contains("ERROR") }
@@ -381,6 +437,15 @@ class MainActivity : AppCompatActivity() {
         b.downloadFrame.shimmering = running
         heroView?.animating = !running
         b.verifyBanner.visibility = if (running && s.needsVerification) View.VISIBLE else View.GONE
+        if (s.needsVerification) {
+            b.verifyTitle.text = when (s.verifyPlatform) {
+                Platform.INSTAGRAM -> "Instagram pide iniciar sesión"
+                else -> "${s.verifyPlatform.label} pide verificar"
+            }
+            b.verifyText.text = if (s.verifyPlatform == Platform.INSTAGRAM)
+                "Descargas en pausa. Toca para iniciar sesión y continuar."
+                else "Descargas en pausa. Toca para confirmar que no eres un robot."
+        }
         updateCount()
 
         if (adapter.locked != running || lastRenderedRunning != running) {

@@ -103,9 +103,10 @@ class VideoAdapter(
         }
     }
 
-    private fun loadThumb(iv: ImageView, url: String, radiusDp: Float) {
-        if (iv.tag == url) return
+    private fun loadThumb(iv: ImageView, url: String?, radiusDp: Float) {
+        if (iv.tag == url && url != null) return
         iv.tag = url
+        if (url == null) { iv.setImageDrawable(null); return }
         iv.load(url) {
             crossfade(true)
             if (radiusDp > 0) {

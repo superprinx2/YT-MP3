@@ -17,6 +17,20 @@ object Cookies {
 
     fun has(ctx: Context) = file(ctx).let { it.exists() && it.length() > 0 }
 
+    /** ¿Hay datos guardados para esta plataforma? (Instagram: sesión iniciada) */
+    fun has(ctx: Context, p: Platform): Boolean {
+        if (!has(ctx)) return false
+        val lines = file(ctx).readLines().filter { it.startsWith(p.cookieDomain) || it.startsWith(p.cookieDomain.trimStart('.')) }
+        return when (p) {
+            Platform.INSTAGRAM -> lines.any { it.split("\t").getOrNull(5) == "sessionid" }
+            else -> lines.isNotEmpty()
+        }
+    }
+
+    /** ¿El WebView tiene ya una sesión de Instagram iniciada? */
+    fun webViewHasInstagramSession(): Boolean =
+        CookieManager.getInstance().getCookie("https://www.instagram.com")?.contains("sessionid=") == true
+
     /** Exporta las cookies del WebView. Devuelve cuántas se guardaron. */
     fun exportFromWebView(ctx: Context): Int {
         val cm = CookieManager.getInstance()
@@ -26,6 +40,8 @@ object Cookies {
             ".youtube.com" to "https://m.youtube.com",
             ".google.com" to "https://www.google.com",
             ".google.com" to "https://accounts.google.com",
+            ".instagram.com" to "https://www.instagram.com",
+            ".tiktok.com" to "https://www.tiktok.com",
         )
         val seen = HashSet<String>()
         val lines = ArrayList<String>()
