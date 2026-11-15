@@ -99,7 +99,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun buildSupport() {
         header("Apoya MegaDown")
         val card = card()
-        card.addView(row("🍔", "Tengo hambre · invítame un menú", "Donar", valueColor = R.color.ios_orange,
+        card.addView(row("🍔", "Tengo hambre", "Dona", valueColor = R.color.ios_orange,
             position = Pos.SINGLE) { Donate.show(this) })
         content.addView(card)
         footer("MegaDown es gratis y sin anuncios. Puedes apoyarla con Yape, Plin o una transferencia al BCP.")
@@ -234,6 +234,13 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun buildYtdlp() {
+        header("Actualizaciones")
+        val appCard = card()
+        appCard.addView(row("📲", "Actualizar MegaDown", "v" + AppUpdater.currentVersion(this),
+            position = Pos.SINGLE) { AppUpdater.check(this, manual = true) })
+        content.addView(appCard)
+        footer("La app revisa GitHub sola al abrirse y te avisa si hay una versión nueva.")
+
         header("Motor de descarga")
         val card = card()
         card.addView(row("⚙️", "yt-dlp", Updater.currentVersion(this), position = Pos.TOP, chevron = false) {})

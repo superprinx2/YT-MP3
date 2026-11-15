@@ -154,7 +154,10 @@ class MainActivity : AppCompatActivity() {
             h.infoText.visibility = if (DownloadState.isPlaylist) View.VISIBLE else View.GONE
         }
 
-        if (savedInstanceState == null) handleIntent(intent)
+        if (savedInstanceState == null) {
+            handleIntent(intent)
+            AppUpdater.check(this, manual = false)
+        }
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED) {
