@@ -1,0 +1,7 @@
+* text=auto
+gradlew text eol=lf
+*.bat text eol=crlf
+*.jar binary
+*.ttf binary
+*.png binary
+android/app/src/main/res/raw/ytdlp binary

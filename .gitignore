@@ -1,0 +1,21 @@
+# APKs compilados: se publican en GitHub Releases, no en el repo
+APK/
+*.apk
+*.aab
+
+# Firma (NUNCA subir)
+*.jks
+*.keystore
+keystore.properties
+
+# Android / Gradle
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+*.iml
+
+# Python
+__pycache__/
+*.pyc

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Colores del sistema de iOS, modo oscuro -->
+    <color name="ios_bg">#000000</color>
+    <color name="ios_card">#1C1C1E</color>
+    <color name="ios_label">#FFFFFF</color>
+    <color name="ios_secondary">#8D8D93</color>
+    <color name="ios_tertiary">#48484A</color>
+    <color name="ios_separator">#38383A</color>
+    <color name="ios_fill">#3D767680</color>
+    <color name="ios_pressed">#1FFFFFFF</color>
+    <color name="ios_blue">#0A84FF</color>
+    <color name="ios_red">#FF453A</color>
+    <color name="ios_green">#30D158</color>
+    <color name="ios_segment_on">#636366</color>
+    <color name="ios_track">#38383A</color>
+    <color name="ios_disabled">#3A3A3C</color>
+</resources>

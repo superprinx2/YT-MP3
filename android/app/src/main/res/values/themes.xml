@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.YTMP3" parent="Base.Theme.YTMP3">
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+
+    <style name="Base.Theme.YTMP3" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/ios_blue</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorSecondary">@color/ios_blue</item>
+        <item name="colorAccent">@color/ios_blue</item>
+        <item name="colorSurface">@color/ios_card</item>
+        <item name="colorOnSurface">@color/ios_label</item>
+        <item name="android:colorBackground">@color/ios_bg</item>
+        <item name="android:windowBackground">@color/ios_bg</item>
+        <item name="android:textColorPrimary">@color/ios_label</item>
+        <item name="android:textColorSecondary">@color/ios_secondary</item>
+        <item name="android:textColorHint">@color/ios_secondary</item>
+        <item name="android:statusBarColor">@color/ios_bg</item>
+        <item name="android:navigationBarColor">@color/ios_bg</item>
+        <item name="android:fontFamily">@font/inter</item>
+        <item name="fontFamily">@font/inter</item>
+        <item name="materialAlertDialogTheme">@style/IosAlert</item>
+    </style>
+
+    <style name="IosAlert" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="colorPrimary">@color/ios_blue</item>
+        <item name="colorSurface">@color/ios_card</item>
+        <item name="colorSurfaceContainerHigh">@color/ios_card</item>
+        <item name="shapeAppearanceOverlay">@style/IosAlertShape</item>
+        <item name="android:fontFamily">@font/inter</item>
+    </style>
+
+    <style name="IosAlertShape">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">14dp</item>
+    </style>
+
+    <!-- Botón principal azul (filled) -->
+    <style name="IosButton.Filled" parent="Widget.Material3.Button">
+        <item name="android:minHeight">52dp</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="cornerRadius">14dp</item>
+        <item name="backgroundTint">@color/btn_filled_bg</item>
+        <item name="android:textColor">#FFFFFF</item>
+        <item name="android:textSize">17sp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:letterSpacing">-0.01</item>
+        <item name="android:fontFamily">@font/inter_semibold</item>
+        <item name="rippleColor">#33FFFFFF</item>
+        <item name="android:stateListAnimator">@null</item>
+    </style>
+
+    <!-- Botón gris con texto azul (gray / tinted) -->
+    <style name="IosButton.Gray" parent="Widget.Material3.Button">
+        <item name="android:minHeight">44dp</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="cornerRadius">12dp</item>
+        <item name="backgroundTint">@color/ios_fill</item>
+        <item name="android:textColor">@color/btn_text_blue</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="android:fontFamily">@font/inter_semibold</item>
+        <item name="rippleColor">@color/ios_pressed</item>
+        <item name="android:stateListAnimator">@null</item>
+    </style>
+
+    <!-- Botón de texto plano -->
+    <style name="IosButton.Plain" parent="Widget.Material3.Button.TextButton">
+        <item name="android:minHeight">44dp</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:textSize">17sp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="android:fontFamily">@font/inter</item>
+        <item name="rippleColor">@color/ios_pressed</item>
+    </style>
+
+    <style name="IosSectionHeader">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">22dp</item>
+        <item name="android:layout_marginBottom">6dp</item>
+        <item name="android:paddingStart">16dp</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:textColor">@color/ios_secondary</item>
+        <item name="android:textAllCaps">true</item>
+        <item name="android:letterSpacing">0.02</item>
+    </style>
+
+    <style name="IosRowLabel">
+        <item name="android:textSize">17sp</item>
+        <item name="android:textColor">@color/ios_label</item>
+    </style>
+
+    <style name="IosRowValue">
+        <item name="android:textSize">17sp</item>
+        <item name="android:textColor">@color/ios_secondary</item>
+    </style>
+</resources>
