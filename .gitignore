@@ -24,3 +24,5 @@ __pycache__/
 promo/tools/
 promo/test/
 promo/build/
+promo/shots/
+promo/sheet.png
