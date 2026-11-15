@@ -5,6 +5,9 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
 import java.util.Locale
 
 enum class Format(val ext: String, val mime: String) {
@@ -13,6 +16,9 @@ enum class Format(val ext: String, val mime: String) {
 }
 
 enum class Status { PENDING, DOWNLOADING, DONE, ERROR }
+
+/** Modos de velocidad. ULTRA calcula el máximo según el celular. */
+enum class SpeedMode(val label: String) { NORMAL("Normal"), FAST("Rápido"), ULTRA("Ultra") }
 
 class VideoItem(
     val id: String,
@@ -25,11 +31,17 @@ class VideoItem(
     @Volatile var progress: Float = 0f
     @Volatile var error: String? = null
     @Volatile var savedAs: String? = null
+    @Volatile var phase: String = ""
+    @Volatile var speedBps: Double = 0.0
+    @Volatile var etaSec: Long = -1
+
+    val thumbnail: String get() = "https://i.ytimg.com/vi/$id/mqdefault.jpg"
+    val thumbnailHq: String get() = "https://i.ytimg.com/vi/$id/hqdefault.jpg"
 }
 
 /**
  * Estado compartido entre la Activity y el servicio de descarga.
- * Todas las escrituras se hacen en el hilo principal (vía [post]).
+ * Todas las escrituras de campos de UI se hacen en el hilo principal (vía [post]).
  */
 object DownloadState {
     val items = mutableListOf<VideoItem>()
@@ -37,15 +49,22 @@ object DownloadState {
     var isPlaylist = false
 
     @Volatile var running = false
-    var current: VideoItem? = null
-    var phase = ""
-    var progress = 0f          // 0..100 del video actual
-    var etaSec = -1L
-    var speed = ""
+    val active = LinkedHashSet<VideoItem>()   // descargándose ahora mismo
+    var phase = ""                            // mensaje global (p. ej. "Comprobando actualizaciones…")
     var doneCount = 0
     var errorCount = 0
     var totalCount = 0
     var finishedMessage: String? = null
+
+    var speedBps = 0.0                        // velocidad total de todas las descargas
+    val speedHistory = ArrayDeque<Float>()    // MB/s, últimas muestras para el gráfico
+    var concurrency = 1                       // descargas simultáneas en este momento
+    var mode = SpeedMode.NORMAL
+    var notice: String? = null                // avisos: calor, batería, datos móviles…
+    var needsVerification = false             // YouTube pidió "no soy un robot"
+    var totalEtaSec = -1L
+    var perMinute = 0.0                       // canciones terminadas por minuto
+    var celebrate = false                     // dispara el confeti una vez
 
     private val main = Handler(Looper.getMainLooper())
     private val listeners = mutableSetOf<() -> Unit>()
@@ -92,6 +111,67 @@ class Prefs(ctx: Context) {
     var bundledFor: Long
         get() = sp.getLong("bundled_for", -1)
         set(v) = sp.edit().putLong("bundled_for", v).commit().let { }
+
+    // ---- Ajustes de velocidad
+    var speedMode: SpeedMode
+        get() = runCatching { SpeedMode.valueOf(sp.getString("speed_mode", "FAST")!!) }.getOrDefault(SpeedMode.FAST)
+        set(v) = sp.edit().putString("speed_mode", v.name).apply()
+
+    var ultraWifiOnly: Boolean
+        get() = sp.getBoolean("ultra_wifi_only", true)
+        set(v) = sp.edit().putBoolean("ultra_wifi_only", v).apply()
+
+    var heatProtect: Boolean
+        get() = sp.getBoolean("heat_protect", true)
+        set(v) = sp.edit().putBoolean("heat_protect", v).apply()
+
+    var batteryPromptShown: Boolean
+        get() = sp.getBoolean("battery_prompt", false)
+        set(v) = sp.edit().putBoolean("battery_prompt", v).apply()
+
+    // ---- Estadísticas
+    var statSongs: Int
+        get() = sp.getInt("stat_songs", 0)
+        set(v) = sp.edit().putInt("stat_songs", v).apply()
+
+    var statBytes: Long
+        get() = sp.getLong("stat_bytes", 0)
+        set(v) = sp.edit().putLong("stat_bytes", v).apply()
+
+    var statSavedSec: Long
+        get() = sp.getLong("stat_saved", 0)
+        set(v) = sp.edit().putLong("stat_saved", v).apply()
+
+    private val dayFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+
+    /** Descargas por día ("2026-11-15:12;2026-11-14:3"), se guardan los últimos 14 días. */
+    fun addDaily(count: Int) {
+        val map = dailyMap().toMutableMap()
+        val today = dayFmt.format(Date())
+        map[today] = (map[today] ?: 0) + count
+        val keep = map.keys.sortedDescending().take(14).toSet()
+        sp.edit().putString("stat_daily",
+            map.filterKeys { it in keep }.entries.joinToString(";") { "${it.key}:${it.value}" }).apply()
+    }
+
+    private fun dailyMap(): Map<String, Int> =
+        (sp.getString("stat_daily", "") ?: "").split(";").mapNotNull {
+            val p = it.split(":"); if (p.size == 2) p[0] to (p[1].toIntOrNull() ?: 0) else null
+        }.toMap()
+
+    /** Últimos 7 días (del más antiguo a hoy): pares (inicial del día, cantidad). */
+    fun last7Days(): List<Pair<String, Int>> {
+        val map = dailyMap()
+        val cal = Calendar.getInstance()
+        cal.add(Calendar.DAY_OF_YEAR, -6)
+        val letters = arrayOf("D", "L", "M", "X", "J", "V", "S")
+        return (0 until 7).map {
+            val key = dayFmt.format(cal.time)
+            val label = letters[cal.get(Calendar.DAY_OF_WEEK) - 1]
+            cal.add(Calendar.DAY_OF_YEAR, 1)
+            label to (map[key] ?: 0)
+        }
+    }
 }
 
 object Quality {
@@ -112,6 +192,54 @@ object Util {
     }
 
     fun fmtEta(sec: Long): String = if (sec < 0) "--:--" else fmtDuration(sec.toDouble()).ifEmpty { "0:00" }
+
+    /** "quedan ~6 min" */
+    fun fmtRemaining(sec: Long): String = when {
+        sec < 0 -> "calculando…"
+        sec < 60 -> "menos de 1 min"
+        sec < 3600 -> "~${(sec + 30) / 60} min"
+        else -> String.format(Locale.US, "~%d h %02d min", sec / 3600, (sec % 3600) / 60)
+    }
+
+    fun fmtSpeed(bps: Double): String = when {
+        bps <= 0 -> "—"
+        bps < 1024 * 1024 -> String.format(Locale.US, "%.0f KB/s", bps / 1024)
+        else -> String.format(Locale.US, "%.1f MB/s", bps / 1024 / 1024)
+    }
+
+    fun fmtBytes(b: Long): String = when {
+        b < 1024L * 1024 -> String.format(Locale.US, "%.0f KB", b / 1024.0)
+        b < 1024L * 1024 * 1024 -> String.format(Locale.US, "%.0f MB", b / 1024.0 / 1024)
+        else -> String.format(Locale.US, "%.2f GB", b / 1024.0 / 1024 / 1024)
+    }
+
+    fun fmtHours(sec: Long): String = when {
+        sec < 60 -> "${sec} s"
+        sec < 3600 -> "${sec / 60} min"
+        else -> String.format(Locale.US, "%.1f h", sec / 3600.0)
+    }
+
+    private val speedRe = Regex("""at\s+~?\s*([\d.]+)\s*([KMG]?i?B)/s""")
+
+    /** Velocidad en bytes/s a partir de una línea de progreso de yt-dlp. */
+    fun parseSpeed(line: String): Double? {
+        val m = speedRe.find(line) ?: return null
+        val n = m.groupValues[1].toDoubleOrNull() ?: return null
+        val mult = when (m.groupValues[2].uppercase(Locale.ROOT)) {
+            "KIB", "KB" -> 1024.0
+            "MIB", "MB" -> 1024.0 * 1024
+            "GIB", "GB" -> 1024.0 * 1024 * 1024
+            else -> 1.0
+        }
+        return n * mult
+    }
+
+    /** ¿YouTube está pidiendo "confirma que no eres un robot"? */
+    fun isBotCheck(err: String?): Boolean {
+        val e = err?.lowercase() ?: return false
+        return listOf("not a bot", "confirm you", "sign in to confirm", "http error 429",
+            "too many requests", "protect our community").any { it in e }
+    }
 
     /** Extrae la primera URL http(s) de un texto (p. ej. lo que comparte la app de YouTube). */
     fun extractUrl(text: String?): String? =

@@ -1,13 +1,17 @@
 package com.gabo.ytmp3
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.MotionEvent
 import android.view.View
+import android.view.animation.DecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
@@ -36,7 +40,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var adapter: VideoAdapter
     private var analyzing = false
     private var startAfterPick = false
+    private var analyzeAfterVerify = false
     private var lastRenderedRunning = false
+    private val lastActive = HashSet<VideoItem>()
+    private val heroView: HeroView? get() = if (::h.isInitialized) h.hero.getChildAt(0) as? HeroView else null
 
     private val pickFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri == null) { startAfterPick = false; return@registerForActivityResult }
@@ -45,6 +52,12 @@ class MainActivity : AppCompatActivity() {
         prefs.treeUri = uri
         showFolder()
         if (startAfterPick) { startAfterPick = false; startDownload() }
+    }
+
+    private val verify = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        if (r.resultCode != RESULT_OK) return@registerForActivityResult
+        if (DownloadState.running) DownloadService.verificationDone()
+        else if (analyzeAfterVerify) { analyzeAfterVerify = false; analyze() }
     }
 
     private val askNotif = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -60,33 +73,44 @@ class MainActivity : AppCompatActivity() {
         b.list.layoutManager = LinearLayoutManager(this)
         h = HeaderMainBinding.inflate(layoutInflater, b.list, false)
         adapter = VideoAdapter(DownloadState.items) { updateCount() }
-        b.list.adapter = ConcatAdapter(HeaderAdapter(h.root), adapter)
+        b.list.adapter = ConcatAdapter(HeaderAdapter(h.root), adapter,
+            FooterAdapter { SettingsActivity.copyHandle(this, it) })
         b.list.itemAnimator = null
 
+        // --- interacción
+        listOf(h.btnAnalyze, h.btnPaste, h.btnSettings, h.modeChip, h.rowFolder, h.rowQuality, b.btnCancel)
+            .forEach { it.pressable(0.96f) }
+        h.logo.setOnClickListener { it.haptic(); it.bounce() }
         h.btnPaste.setOnClickListener {
+            it.haptic()
             val clip = getSystemService(ClipboardManager::class.java).primaryClip
-            val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
+            val text = clip?.takeIf { c -> c.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
             val url = Util.extractUrl(text)
             if (url == null) toast("No hay ningún enlace copiado")
             else { h.urlInput.setText(url); analyze() }
         }
-        h.btnAnalyze.setOnClickListener { analyze() }
+        h.btnAnalyze.setOnClickListener { it.haptic(); analyze() }
         h.urlInput.setOnEditorActionListener { _, id, _ ->
             if (id == EditorInfo.IME_ACTION_GO) { analyze(); true } else false
         }
         h.btnSelectAll.setOnClickListener {
-            val all = DownloadState.items.all { it.checked }
-            DownloadState.items.forEach { it.checked = !all }
+            it.haptic()
+            val all = DownloadState.items.all { i -> i.checked }
+            DownloadState.items.forEach { i -> i.checked = !all }
             adapter.notifyItemRangeChanged(0, DownloadState.items.size)
             updateCount()
         }
-        h.btnMore.setOnClickListener { moreMenu() }
-        h.rowFolder.setOnClickListener { pickFolder.launch(prefs.treeUri) }
-        h.rowQuality.setOnClickListener { chooseQuality() }
-        h.segMp3.setOnClickListener { setFormat(Format.MP3) }
-        h.segMp4.setOnClickListener { setFormat(Format.MP4) }
-        b.btnDownload.setOnClickListener { startDownload() }
-        b.btnCancel.setOnClickListener { confirmCancel() }
+        val openSettings = View.OnClickListener { v -> v.haptic(); startActivity(Intent(this, SettingsActivity::class.java)) }
+        h.btnSettings.setOnClickListener(openSettings)
+        h.modeChip.setOnClickListener(openSettings)
+        h.rowFolder.setOnClickListener { it.haptic(); pickFolder.launch(prefs.treeUri) }
+        h.rowQuality.setOnClickListener { it.haptic(); chooseQuality() }
+        h.segMp3.setOnClickListener { if (!DownloadState.running) { it.haptic(); setFormat(Format.MP3) } }
+        h.segMp4.setOnClickListener { if (!DownloadState.running) { it.haptic(); setFormat(Format.MP4) } }
+        b.btnDownload.setOnClickListener { it.haptic(true); startDownload() }
+        pressScale(b.btnDownload, b.downloadFrame)
+        b.btnCancel.setOnClickListener { it.haptic(); confirmCancel() }
+        b.verifyBanner.setOnClickListener { it.haptic(); openVerify() }
 
         setFormat(prefs.format)
         showFolder()
@@ -98,7 +122,7 @@ class MainActivity : AppCompatActivity() {
             h.infoText.visibility = if (DownloadState.isPlaylist) View.VISIBLE else View.GONE
         }
 
-        if (savedInstanceState == null) handleShare(intent)
+        if (savedInstanceState == null) handleIntent(intent)
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED) {
@@ -106,9 +130,23 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** El botón principal se hunde junto con su marco de brillo. */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun pressScale(touch: View, target: View) {
+        touch.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> if (v.isEnabled) target.animate().scaleX(0.96f).scaleY(0.96f)
+                    .setDuration(90).setInterpolator(DecelerateInterpolator()).start()
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> target.animate().scaleX(1f).scaleY(1f)
+                    .setDuration(320).setInterpolator(OvershootInterpolator(3f)).start()
+            }
+            false
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        handleShare(intent)
+        handleIntent(intent)
     }
 
     override fun onStart() {
@@ -117,12 +155,22 @@ class MainActivity : AppCompatActivity() {
         render()
     }
 
+    override fun onResume() {
+        super.onResume()
+        showHero()
+    }
+
     override fun onStop() {
         DownloadState.removeListener(stateListener)
         super.onStop()
     }
 
-    private fun handleShare(intent: Intent?) {
+    private fun handleIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(DownloadService.EXTRA_OPEN_VERIFY, false) == true) {
+            intent.removeExtra(DownloadService.EXTRA_OPEN_VERIFY)
+            openVerify()
+            return
+        }
         if (intent?.action != Intent.ACTION_SEND) return
         val url = Util.extractUrl(intent.getStringExtra(Intent.EXTRA_TEXT)) ?: return
         if (DownloadState.running) { toast("Hay una descarga en curso"); return }
@@ -130,9 +178,18 @@ class MainActivity : AppCompatActivity() {
         analyze()
     }
 
+    private fun openVerify() = verify.launch(Intent(this, VerifyActivity::class.java))
+
+    private fun showHero() {
+        val mode = prefs.speedMode
+        h.modeText.text = mode.label
+        val n = prefs.statSongs
+        h.heroSubtitle.text = if (n > 0) "🎵 $n descargas · ⚡ ${Util.fmtHours(prefs.statSavedSec)}"
+                              else "Música y videos sin anuncios"
+    }
+
     // ------------------------------------------------------------------ formato / calidad / carpeta
     private fun setFormat(f: Format) {
-        if (DownloadState.running) return
         prefs.format = f
         h.segMp3.isSelected = f == Format.MP3
         h.segMp4.isSelected = f == Format.MP4
@@ -184,6 +241,7 @@ class MainActivity : AppCompatActivity() {
 
         analyzing = true
         h.analyzeSpinner.visibility = View.VISIBLE
+        h.infoText.visibility = View.VISIBLE
         h.infoText.text = "Buscando…"
         render()
 
@@ -196,16 +254,21 @@ class MainActivity : AppCompatActivity() {
                 } else h.infoText.text = "Buscando…"
                 val json = withContext(Dispatchers.IO) {
                     fun info(fast: Boolean): String {
-                        val req = YoutubeDLRequest(url)
-                            .addOption("--flat-playlist")
-                            .addOption("-J")
-                            .addOption("--no-warnings")
-                        // Solo necesitamos título y duración: sin resolver el JS de YouTube (mucho más rápido).
-                        if (fast) req.addOption("--extractor-args", "youtube:player_client=visionos;player_skip=configs,js")
-                        return YoutubeDL.getInstance().execute(req).out
+                        val cookies = Cookies.tempCopy(applicationContext)
+                        try {
+                            val req = YoutubeDLRequest(url)
+                                .addOption("--flat-playlist")
+                                .addOption("-J")
+                                .addOption("--no-warnings")
+                            if (cookies != null) req.addOption("--cookies", cookies.absolutePath)
+                            req.addOption("--cache-dir", App.cacheDir(applicationContext).absolutePath)
+                            // Solo necesitamos título y duración: sin resolver el JS de YouTube (mucho más rápido).
+                            if (fast) req.addOption("--extractor-args", "youtube:player_client=visionos;player_skip=configs,js")
+                            return YoutubeDL.getInstance().execute(req).out
+                        } finally { cookies?.delete() }
                     }
                     try { info(fast = true) } catch (e: YoutubeDL.CanceledException) { throw e }
-                    catch (e: Exception) { info(fast = false) }
+                    catch (e: Exception) { if (Util.isBotCheck(e.message)) throw e else info(fast = false) }
                 }
                 val (title, isPlaylist, list) = withContext(Dispatchers.Default) { Util.parseInfo(json) }
                 DownloadState.items.clear()
@@ -218,11 +281,21 @@ class MainActivity : AppCompatActivity() {
                 h.infoText.visibility = if (isPlaylist) View.VISIBLE else View.GONE
                 h.listTitle.text = if (isPlaylist) "${list.size} videos" else "Video"
                 adapter.notifyDataSetChanged()
+                b.downloadFrame.postDelayed({ b.downloadFrame.bounce() }, 150)
             } catch (e: Throwable) {
-                val msg = e.message?.lines()?.lastOrNull { it.contains("ERROR") }
-                    ?.removePrefix("ERROR:")?.trim() ?: e.message ?: e.toString()
-                h.infoText.visibility = View.VISIBLE
-                h.infoText.text = "No se pudo leer el enlace: ${msg.take(300)}"
+                if (Util.isBotCheck(e.message)) {
+                    h.infoText.text = "YouTube pide verificar que no eres un robot."
+                    ActionSheet.show(this@MainActivity,
+                        "YouTube pide confirmar que no eres un robot. Resuélvelo una vez y la app lo recordará.",
+                        listOf("Verificar ahora")) {
+                        analyzeAfterVerify = true
+                        openVerify()
+                    }
+                } else {
+                    val msg = e.message?.lines()?.lastOrNull { it.contains("ERROR") }
+                        ?.removePrefix("ERROR:")?.trim() ?: e.message ?: e.toString()
+                    h.infoText.text = "No se pudo leer el enlace: ${msg.take(300)}"
+                }
             } finally {
                 analyzing = false
                 h.analyzeSpinner.visibility = View.GONE
@@ -243,6 +316,24 @@ class MainActivity : AppCompatActivity() {
             pickFolder.launch(prefs.treeUri)
             return
         }
+        // Primera vez: pedir permiso para seguir con la pantalla bloqueada.
+        if (!prefs.batteryPromptShown && !Device.ignoresBatteryOptimizations(this)) {
+            prefs.batteryPromptShown = true
+            MaterialAlertDialogBuilder(this)
+                .setTitle("Descargar con la pantalla bloqueada")
+                .setMessage("Para que las descargas sigan aunque bloquees el celular, " +
+                    "permite que YT MP3 funcione sin restricciones de batería.")
+                .setPositiveButton("Permitir") { _, _ ->
+                    SettingsActivity.requestBatteryExemption(this); launchService(tree)
+                }
+                .setNegativeButton("Ahora no") { _, _ -> launchService(tree) }
+                .show()
+            return
+        }
+        launchService(tree)
+    }
+
+    private fun launchService(tree: Uri) {
         val q = if (prefs.format == Format.MP3) prefs.qualityMp3 else prefs.qualityMp4
         DownloadService.start(this, prefs.format, q, tree)
     }
@@ -262,15 +353,15 @@ class MainActivity : AppCompatActivity() {
         val total = DownloadState.items.size
         h.btnSelectAll.text = if (total > 0 && DownloadState.items.all { it.checked }) "Quitar todo" else "Seleccionar todo"
         h.btnSelectAll.visibility = if (total > 1 && !DownloadState.running) View.VISIBLE else View.GONE
-        if (total > 1) h.listTitle.text = "${total} videos · $sel seleccionados"
+        if (total > 1) h.listTitle.text = "$total videos · $sel seleccionados"
         val ext = prefs.format.ext.uppercase(Locale.ROOT)
         b.btnDownload.isEnabled = !DownloadState.running && !analyzing && sel > 0
         b.btnDownload.text = when {
             DownloadState.running -> "Descargando…"
             total == 0 -> "Descargar"
             sel == 0 -> "Selecciona videos"
-            sel > 1 -> "Descargar $sel en $ext"
-            else -> "Descargar $ext"
+            sel > 1 -> "⬇  Descargar $sel en $ext"
+            else -> "⬇  Descargar $ext"
         }
     }
 
@@ -287,37 +378,54 @@ class MainActivity : AppCompatActivity() {
         h.segMp4.isEnabled = !running
         h.segment.alpha = if (running) 0.6f else 1f
         b.btnCancel.visibility = if (running) View.VISIBLE else View.GONE
+        b.downloadFrame.shimmering = running
+        heroView?.animating = !running
+        b.verifyBanner.visibility = if (running && s.needsVerification) View.VISIBLE else View.GONE
         updateCount()
 
         if (adapter.locked != running || lastRenderedRunning != running) {
             adapter.locked = running
             lastRenderedRunning = running
+            lastActive.clear()
             adapter.notifyDataSetChanged()
         } else {
-            s.current?.let { cur ->
-                val pos = s.items.indexOf(cur)
+            // refrescar las filas activas y las que acaban de terminar
+            val now = s.active.toSet()
+            (now + lastActive).forEach { item ->
+                val pos = s.items.indexOf(item)
                 if (pos >= 0) adapter.notifyItemChanged(pos)
             }
+            lastActive.clear(); lastActive.addAll(now)
         }
 
         if (running || s.finishedMessage != null) {
             b.progressCard.visibility = View.VISIBLE
+            val finished = s.doneCount + s.errorCount
             if (running) {
-                b.currentText.text = s.current?.title ?: s.phase
-                b.progressCurrent.setProgressCompat((s.progress * 10).toInt(), true)
-                b.etaText.text = if (s.phase == "Descargando") {
-                    String.format(Locale.US, "%.1f %%  ·  quedan %s", s.progress, Util.fmtEta(s.etaSec)) +
-                        if (s.speed.isNotEmpty()) "  ·  ${s.speed}" else ""
-                } else s.phase
+                b.currentText.text = when {
+                    s.phase.isNotEmpty() -> s.phase
+                    s.active.size > 1 -> "Descargando ${s.active.size} a la vez"
+                    else -> s.active.firstOrNull()?.title ?: "Preparando…"
+                }
+                b.modeBadge.visibility = if (s.mode == SpeedMode.ULTRA) View.VISIBLE else View.GONE
+                b.speedBox.visibility = View.VISIBLE
+                b.sparkline.values = s.speedHistory.toList()
+                b.speedText.text = if (s.perMinute > 0) String.format(Locale.US, "%.1f", s.perMinute) else "—"
+                b.parallelText.text = "descargas/min"
+                b.etaText.text = "Quedan ${Util.fmtRemaining(s.totalEtaSec)}  ·  ${s.active.size} activas de ${s.concurrency}" +
+                    (if (s.speedBps > 0) "  ·  ${Util.fmtSpeed(s.speedBps)}" else "")
+                b.noticeText.text = s.notice
+                b.noticeText.visibility = if (s.notice != null) View.VISIBLE else View.GONE
             } else {
                 b.currentText.text = s.finishedMessage
-                b.progressCurrent.setProgressCompat(1000, false)
-                b.etaText.text = "Toca «Descargar» otra vez para reintentar los que fallaron."
-                    .takeIf { s.errorCount > 0 } ?: "Los archivos están en: ${h.folderValue.text}"
+                b.modeBadge.visibility = View.GONE
+                b.speedBox.visibility = View.GONE
+                b.noticeText.visibility = View.GONE
+                b.etaText.text = if (s.errorCount > 0) "Toca «Descargar» otra vez para reintentar los que fallaron."
+                                 else "Los archivos están en: ${h.folderValue.text}"
             }
-            val finished = s.doneCount + s.errorCount
-            val frac = if (s.totalCount > 0)
-                (finished + if (running) s.progress / 100f else 0f) / s.totalCount else 0f
+            val inFlight = if (running) s.active.sumOf { it.progress.toDouble() } / 100.0 else 0.0
+            val frac = if (s.totalCount > 0) ((finished + inFlight) / s.totalCount).toFloat().coerceIn(0f, 1f) else 0f
             b.totalText.text = "$finished de ${s.totalCount} listos" +
                 (if (s.errorCount > 0) "  ·  ${s.errorCount} con error" else "")
             b.totalPct.text = "${(frac * 100).toInt()} %"
@@ -325,46 +433,13 @@ class MainActivity : AppCompatActivity() {
         } else {
             b.progressCard.visibility = View.GONE
         }
-    }
 
-    // ------------------------------------------------------------------ menú "⋯"
-    private fun moreMenu() {
-        ActionSheet.show(this, "yt-dlp ${Updater.currentVersion(this)}",
-            listOf("Actualizar yt-dlp", "Acerca de")) { i ->
-            when (i) {
-                0 -> updateYtDlp()
-                1 -> about()
-            }
+        if (s.celebrate) {
+            s.celebrate = false
+            b.confetti.burst()
+            b.root.haptic(true)
+            showHero()
         }
-    }
-
-    private fun updateYtDlp() {
-        if (DownloadState.running) { toast("Espera a que termine la descarga"); return }
-        toast("Buscando actualización…")
-        lifecycleScope.launch {
-            val msg = try {
-                App.ready.await()
-                val v = Updater.updateNow(applicationContext)
-                if (v == null) "yt-dlp ya está al día (${Updater.currentVersion(applicationContext)})"
-                else "yt-dlp actualizado a $v"
-            } catch (e: Throwable) {
-                "No se pudo actualizar: ${e.message}"
-            }
-            toast(msg)
-        }
-    }
-
-    private fun about() {
-        val v = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: "?"
-        MaterialAlertDialogBuilder(this)
-            .setTitle("YT MP3 $v")
-            .setMessage("yt-dlp ${Updater.currentVersion(this)}\n\n" +
-                "Descarga audio (MP3) o video (MP4) de YouTube usando yt-dlp y FFmpeg " +
-                "directamente en el teléfono, sin anuncios.\n\n" +
-                "La app se actualiza sola cada pocas horas. Si un video falla, usa «Actualizar yt-dlp».\n\n" +
-                "Fuente Inter © Rasmus Andersson (SIL OFL).")
-            .setPositiveButton("OK", null)
-            .show()
     }
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_LONG).show()

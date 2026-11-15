@@ -18,8 +18,8 @@ android {
         applicationId = "com.gabo.ytmp3"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
     }
 
     signingConfigs {
@@ -73,4 +73,5 @@ dependencies {
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("io.coil-kt:coil:2.7.0")
 }

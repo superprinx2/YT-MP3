@@ -17,6 +17,7 @@ class App : Application() {
     companion object {
         const val CHANNEL_PROGRESS = "progress"
         const val CHANNEL_DONE = "done"
+        const val CHANNEL_ALERT = "alert"
         private const val TAG = "YTMP3"
 
         /** Cada cuánto se comprueba si hay un yt-dlp nuevo antes de buscar/descargar. */
@@ -28,6 +29,9 @@ class App : Application() {
         /** Se completa cuando Python + yt-dlp + ffmpeg están listos (la 1ª vez tarda unos segundos). */
         val ready = CompletableDeferred<Unit>()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+        /** Caché de yt-dlp (desafíos JS de YouTube ya resueltos, etc.). */
+        fun cacheDir(ctx: android.content.Context) = java.io.File(ctx.filesDir, "ytdlp-cache").apply { mkdirs() }
     }
 
     override fun onCreate() {
@@ -57,6 +61,9 @@ class App : Application() {
         )
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_DONE, "Descargas terminadas", NotificationManager.IMPORTANCE_DEFAULT)
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_ALERT, "Avisos (verificación, calor)", NotificationManager.IMPORTANCE_HIGH)
         )
     }
 }

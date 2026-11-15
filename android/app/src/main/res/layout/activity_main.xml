@@ -1,131 +1,263 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/ios_bg"
-    android:orientation="vertical">
-
-    <!-- Contenido desplazable: cabecera con controles + lista de videos -->
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/list"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:clipToPadding="false"
-        android:overScrollMode="ifContentScrolls"
-        android:paddingBottom="12dp" />
-
-    <!-- Barra inferior fija -->
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="0.5dp"
-        android:background="@color/ios_separator" />
+    android:background="@color/ios_bg">
 
     <LinearLayout
-        android:id="@+id/bottomBar"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="@color/ios_bg"
-        android:orientation="vertical"
-        android:paddingHorizontal="16dp"
-        android:paddingTop="10dp"
-        android:paddingBottom="12dp">
+        android:layout_height="match_parent"
+        android:orientation="vertical">
 
+        <!-- Contenido desplazable: cabecera + lista de videos + créditos -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/list"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:clipToPadding="false"
+            android:overScrollMode="ifContentScrolls"
+            android:paddingBottom="12dp" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="0.5dp"
+            android:background="@color/ios_separator" />
+
+        <!-- Barra inferior fija -->
         <LinearLayout
-            android:id="@+id/progressCard"
+            android:id="@+id/bottomBar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="10dp"
-            android:background="@drawable/bg_card"
+            android:animateLayoutChanges="true"
+            android:background="@color/ios_bg"
             android:orientation="vertical"
-            android:padding="14dp"
-            android:visibility="gone">
+            android:paddingHorizontal="16dp"
+            android:paddingTop="10dp"
+            android:paddingBottom="12dp">
 
-            <TextView
-                android:id="@+id/currentText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:fontFamily="@font/inter_semibold"
-                android:maxLines="1"
-                android:textColor="@color/ios_label"
-                android:textSize="15sp" />
-
-            <com.google.android.material.progressindicator.LinearProgressIndicator
-                android:id="@+id/progressCurrent"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:max="1000"
-                app:indicatorColor="@color/ios_blue"
-                app:indicatorTrackGapSize="0dp"
-                app:trackColor="@color/ios_track"
-                app:trackCornerRadius="2dp"
-                app:trackStopIndicatorSize="0dp"
-                app:trackThickness="4dp" />
-
-            <TextView
-                android:id="@+id/etaText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:textColor="@color/ios_secondary"
-                android:textSize="13sp" />
-
+            <!-- Aviso: YouTube pide verificar -->
             <LinearLayout
+                android:id="@+id/verifyBanner"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:orientation="horizontal">
+                android:layout_marginBottom="10dp"
+                android:background="@drawable/bg_banner_orange"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="12dp"
+                android:visibility="gone">
 
-                <TextView
-                    android:id="@+id/totalText"
+                <ImageView
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_shield" />
+
+                <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
                     android:layout_weight="1"
-                    android:fontFamily="@font/inter_medium"
-                    android:textColor="@color/ios_label"
-                    android:textSize="13sp" />
+                    android:orientation="vertical">
 
-                <TextView
-                    android:id="@+id/totalPct"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textColor="@color/ios_secondary"
-                    android:textSize="13sp" />
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="@font/inter_semibold"
+                        android:text="YouTube pide verificar"
+                        android:textColor="@color/ios_label"
+                        android:textSize="15sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Descargas en pausa. Toca para confirmar que no eres un robot."
+                        android:textColor="@color/ios_secondary"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <ImageView
+                    android:layout_width="14dp"
+                    android:layout_height="14dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_chevron" />
             </LinearLayout>
 
-            <com.google.android.material.progressindicator.LinearProgressIndicator
-                android:id="@+id/progressTotal"
+            <LinearLayout
+                android:id="@+id/progressCard"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:max="1000"
-                app:indicatorColor="@color/ios_green"
-                app:indicatorTrackGapSize="0dp"
-                app:trackColor="@color/ios_track"
-                app:trackCornerRadius="2dp"
-                app:trackStopIndicatorSize="0dp"
-                app:trackThickness="4dp" />
+                android:layout_marginBottom="10dp"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="14dp"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/currentText"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:ellipsize="end"
+                        android:fontFamily="@font/inter_semibold"
+                        android:maxLines="1"
+                        android:textColor="@color/ios_label"
+                        android:textSize="15sp" />
+
+                    <TextView
+                        android:id="@+id/modeBadge"
+                        android:layout_width="wrap_content"
+                        android:layout_height="24dp"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_chip_ultra"
+                        android:fontFamily="@font/inter_bold"
+                        android:gravity="center"
+                        android:paddingHorizontal="10dp"
+                        android:text="⚡ ULTRA"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp"
+                        android:visibility="gone" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/noticeText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textColor="@color/ios_orange"
+                    android:textSize="13sp"
+                    android:visibility="gone" />
+
+                <!-- Gráfico de velocidad -->
+                <LinearLayout
+                    android:id="@+id/speedBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <com.gabo.ytmp3.SparklineView
+                        android:id="@+id/sparkline"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="1" />
+
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="12dp"
+                        android:gravity="end"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/speedText"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:fontFamily="@font/inter_bold"
+                            android:text="—"
+                            android:textColor="@color/ios_label"
+                            android:textSize="18sp" />
+
+                        <TextView
+                            android:id="@+id/parallelText"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textColor="@color/ios_secondary"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/etaText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:textColor="@color/ios_secondary"
+                    android:textSize="13sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/totalText"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:fontFamily="@font/inter_medium"
+                        android:textColor="@color/ios_label"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/totalPct"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="@font/inter_semibold"
+                        android:textColor="@color/ios_green"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <com.google.android.material.progressindicator.LinearProgressIndicator
+                    android:id="@+id/progressTotal"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:max="1000"
+                    app:indicatorColor="@color/ios_green"
+                    app:indicatorTrackGapSize="0dp"
+                    app:trackColor="@color/ios_track"
+                    app:trackCornerRadius="3dp"
+                    app:trackStopIndicatorSize="0dp"
+                    app:trackThickness="6dp" />
+            </LinearLayout>
+
+            <com.gabo.ytmp3.ShimmerFrame
+                android:id="@+id/downloadFrame"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:elevation="4dp">
+
+                <TextView
+                    android:id="@+id/btnDownload"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/bg_btn_main"
+                    android:clickable="true"
+                    android:enabled="false"
+                    android:focusable="true"
+                    android:fontFamily="@font/inter_semibold"
+                    android:gravity="center"
+                    android:text="Descargar"
+                    android:textColor="#FFFFFF"
+                    android:textSize="17sp" />
+            </com.gabo.ytmp3.ShimmerFrame>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnCancel"
+                style="@style/IosButton.Plain"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="Cancelar descarga"
+                android:textColor="@color/btn_text_red"
+                android:visibility="gone" />
         </LinearLayout>
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnDownload"
-            style="@style/IosButton.Filled"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:enabled="false"
-            android:text="Descargar" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnCancel"
-            style="@style/IosButton.Plain"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:text="Cancelar descarga"
-            android:textColor="@color/btn_text_red"
-            android:visibility="gone" />
     </LinearLayout>
-</LinearLayout>
+
+    <com.gabo.ytmp3.ConfettiView
+        android:id="@+id/confetti"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+</FrameLayout>

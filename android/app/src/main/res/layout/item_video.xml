@@ -11,11 +11,11 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
-        android:minHeight="58dp"
+        android:minHeight="64dp"
         android:orientation="horizontal"
-        android:paddingStart="14dp"
-        android:paddingEnd="14dp"
-        android:paddingVertical="9dp">
+        android:paddingVertical="8dp"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp">
 
         <ImageView
             android:id="@+id/check"
@@ -24,11 +24,20 @@
             android:importantForAccessibility="no"
             android:src="@drawable/ic_circle_check" />
 
+        <ImageView
+            android:id="@+id/thumb"
+            android:layout_width="80dp"
+            android:layout_height="45dp"
+            android:layout_marginStart="12dp"
+            android:background="@drawable/bg_thumb"
+            android:importantForAccessibility="no"
+            android:scaleType="centerCrop" />
+
         <LinearLayout
             android:id="@+id/textBox"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginStart="14dp"
+            android:layout_marginStart="12dp"
             android:layout_weight="1"
             android:orientation="vertical">
 
@@ -39,7 +48,7 @@
                 android:ellipsize="end"
                 android:maxLines="2"
                 android:textColor="@color/ios_label"
-                android:textSize="16sp" />
+                android:textSize="15sp" />
 
             <TextView
                 android:id="@+id/subtitle"
@@ -49,7 +58,17 @@
                 android:ellipsize="end"
                 android:maxLines="2"
                 android:textColor="@color/ios_secondary"
-                android:textSize="13sp" />
+                android:textSize="12sp" />
+
+            <ProgressBar
+                android:id="@+id/miniProgress"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="4dp"
+                android:layout_marginTop="5dp"
+                android:max="1000"
+                android:progressDrawable="@drawable/bg_mini_progress"
+                android:visibility="gone" />
         </LinearLayout>
     </LinearLayout>
 
@@ -57,6 +76,6 @@
         android:id="@+id/separator"
         android:layout_width="match_parent"
         android:layout_height="0.5dp"
-        android:layout_marginStart="52dp"
+        android:layout_marginStart="128dp"
         android:background="@color/ios_separator" />
 </LinearLayout>
