@@ -87,6 +87,8 @@ class VerifyActivity : AppCompatActivity() {
                     "Cuando veas tu inicio de Instagram, toca «Listo». Tus datos solo se guardan en este teléfono."
                 Platform.TIKTOK -> "Si TikTok muestra una verificación, resuélvela aquí. Iniciar sesión es opcional. " +
                     "Luego toca «Listo»."
+                Platform.FACEBOOK -> "Inicia sesión en Facebook solo si el video no es público o Facebook lo pide. " +
+                    "Cuando termines, toca «Listo». Tus datos solo se guardan en este teléfono."
             }
             setTextColor(ContextCompat.getColor(this@VerifyActivity, R.color.ios_secondary))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)

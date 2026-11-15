@@ -1,6 +1,6 @@
 # YT-MP3
 
-Descarga música y videos de **YouTube, TikTok e Instagram** sin anuncios, en Android (y YouTube en Windows).
+Descarga música y videos de **YouTube, TikTok, Instagram y Facebook** sin anuncios, en Android (y YouTube en Windows).
 Por dentro usa [yt-dlp](https://github.com/yt-dlp/yt-dlp) + FFmpeg: todo se procesa en tu equipo, sin pasar por servidores de terceros.
 
 <p align="center">
@@ -22,11 +22,13 @@ Todas las versiones están en [Releases](https://github.com/superprinx2/YT-MP3/r
 
 ## Funciones
 
-- **Tres plataformas** con pestañas: **YouTube**, **TikTok** e **Instagram**. Al pegar un enlace la app cambia sola de pestaña.
+- **Cuatro plataformas** con pestañas: **YouTube**, **TikTok**, **Instagram** y **Facebook**. Al pegar un enlace la app cambia sola de pestaña.
 - **TikTok**: video MP4 **sin marca de agua** o solo el audio en MP3.
-- **Instagram**: reels y videos de publicaciones en MP4 o MP3. Instagram casi siempre exige **iniciar sesión**:
-  se hace una vez dentro de la app y queda guardado solo en el teléfono (recomendado: cuenta secundaria).
-- Pega un enlace de **video o playlist** (o usa **Compartir → YT MP3** desde la app de YouTube, TikTok o Instagram).
+- **Instagram**: reels y videos de publicaciones en MP4 o MP3.
+- **Facebook**: videos y reels públicos en MP4 o MP3.
+- **No hace falta iniciar sesión.** Solo si una plataforma lo exige (o pide «confirma que no eres un robot»),
+  la app pausa, te avisa y te deja hacerlo dentro de la app; queda guardado solo en el teléfono.
+- Pega un enlace de **video o playlist** (o usa **Compartir → YT MP3** desde YouTube, TikTok, Instagram o Facebook).
 - **MP3** (audio, con portada y etiquetas) o **MP4** (video H.264), con selección de calidad.
 - **Playlists completas**: detecta todos los videos, eliges cuáles con casillas y los baja todos.
 - **Modo Ultra ⚡**: varias descargas a la vez según la memoria y núcleos del teléfono (hasta 8).

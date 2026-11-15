@@ -114,7 +114,7 @@
     <LinearLayout
         android:id="@+id/platformBar"
         android:layout_width="match_parent"
-        android:layout_height="52dp"
+        android:layout_height="68dp"
         android:layout_marginTop="14dp"
         android:background="@drawable/bg_platform_bar"
         android:orientation="horizontal"
@@ -127,26 +127,25 @@
             android:layout_weight="1"
             android:background="@drawable/bg_platform_tab"
             android:gravity="center"
-            android:orientation="horizontal"
-            android:paddingHorizontal="6dp">
+            android:orientation="vertical">
 
             <ImageView
-                android:layout_width="26dp"
-                android:layout_height="26dp"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
                 android:background="@drawable/bg_tab_youtube"
                 android:importantForAccessibility="no"
-                android:padding="5dp"
+                android:padding="6dp"
                 android:src="@drawable/ic_tab_play" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="7dp"
+                android:layout_marginTop="3dp"
                 android:fontFamily="@font/inter_semibold"
                 android:maxLines="1"
                 android:text="YouTube"
                 android:textColor="@color/ios_label"
-                android:textSize="14sp" />
+                android:textSize="12sp" />
         </LinearLayout>
 
         <LinearLayout
@@ -156,26 +155,25 @@
             android:layout_weight="1"
             android:background="@drawable/bg_platform_tab"
             android:gravity="center"
-            android:orientation="horizontal"
-            android:paddingHorizontal="6dp">
+            android:orientation="vertical">
 
             <ImageView
-                android:layout_width="26dp"
-                android:layout_height="26dp"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
                 android:background="@drawable/bg_tab_tiktok"
                 android:importantForAccessibility="no"
-                android:padding="5dp"
+                android:padding="6dp"
                 android:src="@drawable/ic_tab_note" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="7dp"
+                android:layout_marginTop="3dp"
                 android:fontFamily="@font/inter_semibold"
                 android:maxLines="1"
                 android:text="TikTok"
                 android:textColor="@color/ios_label"
-                android:textSize="14sp" />
+                android:textSize="12sp" />
         </LinearLayout>
 
         <LinearLayout
@@ -185,26 +183,53 @@
             android:layout_weight="1"
             android:background="@drawable/bg_platform_tab"
             android:gravity="center"
-            android:orientation="horizontal"
-            android:paddingHorizontal="6dp">
+            android:orientation="vertical">
 
             <ImageView
-                android:layout_width="26dp"
-                android:layout_height="26dp"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
                 android:background="@drawable/bg_tab_instagram"
                 android:importantForAccessibility="no"
-                android:padding="5dp"
+                android:padding="6dp"
                 android:src="@drawable/ic_tab_camera" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="7dp"
+                android:layout_marginTop="3dp"
                 android:fontFamily="@font/inter_semibold"
                 android:maxLines="1"
                 android:text="Instagram"
                 android:textColor="@color/ios_label"
-                android:textSize="14sp" />
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tabFacebook"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="@drawable/bg_platform_tab"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageView
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:background="@drawable/bg_tab_facebook"
+                android:importantForAccessibility="no"
+                android:padding="6dp"
+                android:src="@drawable/ic_tab_video" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:fontFamily="@font/inter_semibold"
+                android:maxLines="1"
+                android:text="Facebook"
+                android:textColor="@color/ios_label"
+                android:textSize="12sp" />
         </LinearLayout>
     </LinearLayout>
 
@@ -240,6 +265,16 @@
             android:textColor="@color/ios_label"
             android:textColorHint="@color/ios_secondary"
             android:textSize="16sp" />
+
+        <ImageButton
+            android:id="@+id/btnClear"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_marginEnd="4dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Borrar enlace"
+            android:src="@drawable/ic_clear"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/btnPaste"

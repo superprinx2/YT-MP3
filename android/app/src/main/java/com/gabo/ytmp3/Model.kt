@@ -37,7 +37,11 @@ enum class Platform(
     INSTAGRAM("Instagram", listOf("instagram.com", "instagr.am"),
         "https://www.instagram.com/accounts/login/", ".instagram.com",
         intArrayOf(0xFFFEDA75.toInt(), 0xFFFA7E1E.toInt(), 0xFFD62976.toInt(), 0xFF962FBF.toInt(), 0xFF4F5BD5.toInt()),
-        0xFFD62976.toInt());
+        0xFFD62976.toInt()),
+    FACEBOOK("Facebook", listOf("facebook.com", "fb.watch", "fb.com"),
+        "https://m.facebook.com/login/", ".facebook.com",
+        intArrayOf(0xFF0A5BD8.toInt(), 0xFF1877F2.toInt(), 0xFF42A5F5.toInt(), 0xFF6C5CE7.toInt(), 0xFF0A5BD8.toInt()),
+        0xFF1877F2.toInt());
 
     companion object {
         fun detect(url: String?): Platform? {
@@ -304,11 +308,14 @@ object Util {
     /** Título legible: los de TikTok/Instagram son descripciones largas con hashtags. */
     private fun cleanTitle(raw: String, uploader: String?, platform: Platform): String {
         if (platform == Platform.YOUTUBE) return raw
-        val noTags = raw.replace(Regex("\\s*#\\S+"), "").trim().take(90)
+        // Facebook: "9.9K views · 340 reactions | Texto real" → "Texto real"
+        val base = if (platform == Platform.FACEBOOK && raw.contains(" | ")) raw.substringAfter(" | ").trim() else raw
+        if (platform == Platform.FACEBOOK && base.endsWith(" on Reels") && !uploader.isNullOrEmpty()) return "Reel de $uploader"
+        val noTags = base.replace(Regex("\\s*#\\S+"), "").trim().take(90)
         return when {
             noTags.isNotEmpty() && !noTags.startsWith("Video by") -> noTags
             !uploader.isNullOrEmpty() -> "Video de @$uploader"
-            else -> raw.take(90)
+            else -> base.take(90)
         }
     }
 

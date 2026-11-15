@@ -41,6 +41,8 @@ class MainActivity : AppCompatActivity() {
     private var analyzing = false
     private var startAfterPick = false
     private var analyzeAfterVerify = false
+    /** Instagram pidió iniciar sesión en el último intento (solo entonces se muestra la tarjeta). */
+    private var instagramAskedLogin = false
     private var lastRenderedRunning = false
     private val lastActive = HashSet<VideoItem>()
     private val heroView: HeroView? get() = if (::h.isInitialized) h.hero.getChildAt(0) as? HeroView else null
@@ -112,9 +114,24 @@ class MainActivity : AppCompatActivity() {
         pressScale(b.btnDownload, b.downloadFrame)
         b.btnCancel.setOnClickListener { it.haptic(); confirmCancel() }
         b.verifyBanner.setOnClickListener { it.haptic(); openVerify(DownloadState.verifyPlatform) }
+        h.btnClear.setOnClickListener {
+            it.haptic()
+            h.urlInput.setText("")
+            h.urlError.visibility = View.GONE
+            h.urlInput.requestFocus()
+            getSystemService(InputMethodManager::class.java).showSoftInput(h.urlInput, 0)
+        }
+        h.urlInput.addTextChangedListener(object : android.text.TextWatcher {
+            override fun afterTextChanged(s: android.text.Editable?) {
+                h.btnClear.visibility = if (s.isNullOrEmpty() || DownloadState.running) View.GONE else View.VISIBLE
+            }
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+        })
         h.loginCard.setOnClickListener { it.haptic(); openVerify(Platform.INSTAGRAM) }
         h.loginCard.pressable(0.97f)
-        mapOf(h.tabYoutube to Platform.YOUTUBE, h.tabTiktok to Platform.TIKTOK, h.tabInstagram to Platform.INSTAGRAM)
+        mapOf(h.tabYoutube to Platform.YOUTUBE, h.tabTiktok to Platform.TIKTOK, h.tabInstagram to Platform.INSTAGRAM,
+            h.tabFacebook to Platform.FACEBOOK)
             .forEach { (v, p) ->
                 v.pressable(0.95f)
                 v.setOnClickListener { if (!DownloadState.running) { it.haptic(); setPlatform(p) } }
@@ -192,7 +209,8 @@ class MainActivity : AppCompatActivity() {
     // ------------------------------------------------------------------ plataforma
     private fun setPlatform(p: Platform, animate: Boolean = true) {
         prefs.platform = p
-        val tabs = mapOf(Platform.YOUTUBE to h.tabYoutube, Platform.TIKTOK to h.tabTiktok, Platform.INSTAGRAM to h.tabInstagram)
+        val tabs = mapOf(Platform.YOUTUBE to h.tabYoutube, Platform.TIKTOK to h.tabTiktok,
+            Platform.INSTAGRAM to h.tabInstagram, Platform.FACEBOOK to h.tabFacebook)
         tabs.forEach { (tp, v) ->
             v.isSelected = tp == p
             v.alpha = if (tp == p) 1f else 0.7f
@@ -203,13 +221,16 @@ class MainActivity : AppCompatActivity() {
             Platform.YOUTUBE -> "Pega el enlace del video o playlist"
             Platform.TIKTOK -> "Pega el enlace del TikTok"
             Platform.INSTAGRAM -> "Pega el enlace del reel o publicación"
+            Platform.FACEBOOK -> "Pega el enlace del video o reel de Facebook"
         }
         if (DownloadState.items.isEmpty() && !analyzing) {
             h.infoText.visibility = View.VISIBLE
             h.infoText.text = when (p) {
                 Platform.YOUTUBE -> "También puedes tocar «Compartir» en la app de YouTube y elegir YT MP3."
                 Platform.TIKTOK -> "Videos sin marca de agua en MP4, o solo el audio en MP3. También funciona «Compartir» desde TikTok."
-                Platform.INSTAGRAM -> "Reels y videos de publicaciones en MP4 o MP3. También funciona «Compartir» desde Instagram."
+                Platform.INSTAGRAM -> "Reels y videos de publicaciones en MP4 o MP3. También funciona «Compartir» desde Instagram. " +
+                    "Si Instagram pidiera iniciar sesión, te avisaremos."
+                Platform.FACEBOOK -> "Videos y reels públicos de Facebook en MP4 o MP3. También funciona «Compartir» desde Facebook."
             }
         }
         showLoginCard()
@@ -218,7 +239,8 @@ class MainActivity : AppCompatActivity() {
     private fun showLoginCard() {
         if (!::h.isInitialized) return
         h.loginCard.visibility =
-            if (prefs.platform == Platform.INSTAGRAM && !Cookies.has(this, Platform.INSTAGRAM)) View.VISIBLE else View.GONE
+            if (prefs.platform == Platform.INSTAGRAM && instagramAskedLogin && !Cookies.has(this, Platform.INSTAGRAM))
+                View.VISIBLE else View.GONE
     }
 
     private fun showHero() {
@@ -332,11 +354,15 @@ class MainActivity : AppCompatActivity() {
                 b.downloadFrame.postDelayed({ b.downloadFrame.bounce() }, 150)
             } catch (e: Throwable) {
                 val login = platform != Platform.YOUTUBE && Util.needsLogin(e.message)
+                if (login && platform == Platform.INSTAGRAM) { instagramAskedLogin = true; showLoginCard() }
                 if (Util.isBotCheck(e.message) || login) {
                     val (info, sheet, action) = when (platform) {
                         Platform.INSTAGRAM -> Triple("Instagram pide iniciar sesión para ver este contenido.",
                             "Instagram pide iniciar sesión. Hazlo una vez y la app lo recordará (te recomendamos una cuenta secundaria).",
                             "Iniciar sesión en Instagram")
+                        Platform.FACEBOOK -> Triple("Facebook pide iniciar sesión para ver este video.",
+                            "Este video de Facebook no es público o Facebook pide iniciar sesión. Hazlo una vez y la app lo recordará.",
+                            "Iniciar sesión en Facebook")
                         Platform.TIKTOK -> Triple("TikTok pide verificación.",
                             "TikTok pide verificar. Resuélvelo una vez y la app lo recordará.", "Verificar ahora")
                         Platform.YOUTUBE -> Triple("YouTube pide verificar que no eres un robot.",
@@ -428,6 +454,7 @@ class MainActivity : AppCompatActivity() {
         h.btnAnalyze.isEnabled = !running && !analyzing
         h.btnPaste.isEnabled = !running && !analyzing
         h.urlInput.isEnabled = !running
+        h.btnClear.visibility = if (running || h.urlInput.text.isNullOrEmpty()) View.GONE else View.VISIBLE
         h.rowFolder.isEnabled = !running
         h.rowQuality.isEnabled = !running
         h.segMp3.isEnabled = !running

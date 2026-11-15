@@ -351,6 +351,8 @@ class DownloadService : Service() {
         val (phaseMsg, title, text) = when (p) {
             Platform.INSTAGRAM -> Triple("En pausa: Instagram pide iniciar sesión",
                 "Instagram pide iniciar sesión", "Toca para iniciar sesión y continuar con las descargas.")
+            Platform.FACEBOOK -> Triple("En pausa: Facebook pide iniciar sesión",
+                "Facebook pide iniciar sesión", "Toca para iniciar sesión y continuar con las descargas.")
             Platform.TIKTOK -> Triple("En pausa: TikTok pide verificación",
                 "TikTok pide verificación", "Toca para resolverlo y continuar con las descargas.")
             Platform.YOUTUBE -> Triple("En pausa: YouTube pide verificar que no eres un robot",
@@ -453,6 +455,10 @@ class DownloadService : Service() {
                 // Quitar hashtags del título para que el nombre del archivo quede limpio.
                 addCommands(listOf("--replace-in-metadata", "title", "\\s*#\\S+", ""))
             }
+            if (item.platform == Platform.FACEBOOK) {
+                // "9.9K views · 340 reactions | Texto" → "Texto"
+                addCommands(listOf("--replace-in-metadata", "title", "^[^|]*\\|\\s*", ""))
+            }
             addOption("-o", if (item.platform == Platform.YOUTUBE) "${tmp.absolutePath}/%(title)s.%(ext)s"
                             else "${tmp.absolutePath}/%(uploader,channel|video)s - %(title).60B [%(id)s].%(ext)s")
             addOption("--embed-metadata")
@@ -471,6 +477,10 @@ class DownloadService : Service() {
                         // Siempre la versión sin marca de agua; H.264 para que se vea en cualquier teléfono.
                         addOption("-f", "b[format_note!*=atermark]/bv*[format_note!*=atermark]+ba/b")
                         addOption("-S", "${res}vcodec:h264,br")
+                    } else if (item.platform == Platform.FACEBOOK) {
+                        // Facebook: el archivo progresivo "hd"/"sd" ya trae audio; si no, se une video+audio.
+                        addOption("-f", "hd/sd/bv*+ba/b")
+                        addOption("-S", "${res}vcodec:h264,ext:mp4:m4a")
                     } else {
                         addOption("-S", "${res}vcodec:h264,ext:mp4:m4a")
                     }

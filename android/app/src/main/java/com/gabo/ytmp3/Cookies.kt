@@ -42,6 +42,8 @@ object Cookies {
             ".google.com" to "https://accounts.google.com",
             ".instagram.com" to "https://www.instagram.com",
             ".tiktok.com" to "https://www.tiktok.com",
+            ".facebook.com" to "https://www.facebook.com",
+            ".facebook.com" to "https://m.facebook.com",
         )
         val seen = HashSet<String>()
         val lines = ArrayList<String>()
