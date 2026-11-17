@@ -26,11 +26,9 @@
             android:layout_height="58dp"
             android:layout_marginStart="18dp"
             android:layout_marginTop="18dp"
-            android:background="@drawable/bg_logo"
-            android:contentDescription="MegaDown"
+            android:contentDescription="DownSong"
             android:elevation="4dp"
-            android:padding="10dp"
-            android:src="@drawable/ic_logo_note" />
+            android:src="@drawable/logo_downsong" />
 
         <TextView
             android:id="@+id/btnDonate"
@@ -83,7 +81,7 @@
                     android:shadowColor="#40000000"
                     android:shadowDy="2"
                     android:shadowRadius="6"
-                    android:text="MegaDown"
+                    android:text="DownSong"
                     android:textColor="#FFFFFF"
                     android:textSize="30sp" />
 
@@ -160,6 +158,34 @@
                 android:fontFamily="@font/inter_semibold"
                 android:maxLines="1"
                 android:text="YouTube"
+                android:textColor="@color/ios_label"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tabSpotify"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="@drawable/bg_platform_tab"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageView
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:background="@drawable/bg_tab_spotify"
+                android:importantForAccessibility="no"
+                android:padding="6dp"
+                android:src="@drawable/ic_tab_waves" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:fontFamily="@font/inter_semibold"
+                android:maxLines="1"
+                android:text="Spotify"
                 android:textColor="@color/ios_label"
                 android:textSize="12sp" />
         </LinearLayout>
@@ -248,33 +274,6 @@
                 android:textSize="12sp" />
         </LinearLayout>
 
-        <LinearLayout
-            android:id="@+id/tabSpotify"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:background="@drawable/bg_platform_tab"
-            android:gravity="center"
-            android:orientation="vertical">
-
-            <ImageView
-                android:layout_width="28dp"
-                android:layout_height="28dp"
-                android:background="@drawable/bg_tab_spotify"
-                android:importantForAccessibility="no"
-                android:padding="6dp"
-                android:src="@drawable/ic_tab_waves" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="3dp"
-                android:fontFamily="@font/inter_semibold"
-                android:maxLines="1"
-                android:text="Spotify"
-                android:textColor="@color/ios_label"
-                android:textSize="12sp" />
-        </LinearLayout>
     </LinearLayout>
 
     <!-- Campo de búsqueda tipo iOS -->
@@ -369,7 +368,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="10dp"
         android:paddingHorizontal="4dp"
-        android:text="También puedes tocar «Compartir» en la app de YouTube y elegir MegaDown."
+        android:text="También puedes tocar «Compartir» en la app de YouTube y elegir DownSong."
         android:textColor="@color/ios_secondary"
         android:textSize="14sp" />
 

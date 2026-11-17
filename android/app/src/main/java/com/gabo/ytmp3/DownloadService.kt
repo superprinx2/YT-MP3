@@ -52,19 +52,19 @@ class DownloadService : Service() {
         private const val ACTION_CANCEL = "cancel"
         private const val EXTRA_FORMAT = "format"
         private const val EXTRA_QUALITY = "quality"
-        private const val EXTRA_TREE = "tree"
+        private const val EXTRA_PLAYLISTS = "playlists"
         const val EXTRA_OPEN_VERIFY = "open_verify"
 
         @Volatile private var cancelRequested = false
         @Volatile private var verifyPaused = false
         private val pids = ConcurrentHashMap.newKeySet<String>()
 
-        fun start(ctx: Context, format: Format, quality: Int, tree: Uri) {
+        fun start(ctx: Context, format: Format, quality: Int, playlists: LongArray) {
             val i = Intent(ctx, DownloadService::class.java)
                 .setAction(ACTION_START)
                 .putExtra(EXTRA_FORMAT, format.name)
                 .putExtra(EXTRA_QUALITY, quality)
-                .putExtra(EXTRA_TREE, tree.toString())
+                .putExtra(EXTRA_PLAYLISTS, playlists)
             ContextCompat.startForegroundService(ctx, i)
         }
 
@@ -139,7 +139,7 @@ class DownloadService : Service() {
         prefs = Prefs(this)
         val format = Format.valueOf(intent.getStringExtra(EXTRA_FORMAT)!!)
         val quality = intent.getIntExtra(EXTRA_QUALITY, 0)
-        val tree = Uri.parse(intent.getStringExtra(EXTRA_TREE)!!)
+        val targets = intent.getLongArrayExtra(EXTRA_PLAYLISTS)?.toList().orEmpty()
 
         val jobs = DownloadState.items.filter { it.checked }
         if (jobs.isEmpty()) { stopSelf(); return START_NOT_STICKY }
@@ -174,11 +174,11 @@ class DownloadService : Service() {
                 "ytmp3:wifi")
             .apply { setReferenceCounted(false); acquire() }
 
-        scope.launch { runQueue(jobs, format, quality, tree, mode) }
+        scope.launch { runQueue(jobs, format, quality, targets, mode) }
         return START_NOT_STICKY
     }
 
-    private suspend fun runQueue(jobs: List<VideoItem>, format: Format, quality: Int, treeUri: Uri, mode: SpeedMode) {
+    private suspend fun runQueue(jobs: List<VideoItem>, format: Format, quality: Int, targets: List<Long>, mode: SpeedMode) {
         val ok = AtomicInteger(0)
         val failed = AtomicInteger(0)
         var fatal: String? = null
@@ -187,11 +187,6 @@ class DownloadService : Service() {
             App.ready.await()
             DownloadState.post { phase = "Comprobando actualizaciones de yt-dlp…" }
             Updater.ensureFresh(this, App.UPDATE_EVERY_MS)
-            val tree = DocumentFile.fromTreeUri(this, treeUri)
-            if (tree == null || !tree.canWrite()) {
-                throw IOException("No hay permiso para escribir en la carpeta elegida. Vuelve a elegirla.")
-            }
-            val existing = tree.listFiles().mapNotNull { it.name }.toMutableSet()
             DownloadState.post { phase = "" }
 
             val queue = ArrayDeque(jobs)
@@ -215,7 +210,7 @@ class DownloadService : Service() {
                             inFlight += item
                             DownloadState.post { active += item }
 
-                            val r = downloadOne(item, format, quality, tree, existing)
+                            val r = downloadOne(item, format, quality, targets)
                             when (r) {
                                 Result.OK -> {
                                     ok.incrementAndGet()
@@ -252,6 +247,7 @@ class DownloadService : Service() {
             Log.e(TAG, "queue failed", e)
             fatal = e.message ?: e.toString()
         } finally {
+            Loudness.kick(this)
             val wall = (SystemClock.elapsedRealtime() - started) / 1000
             withContext(Dispatchers.Main) { finish(ok.get(), failed.get(), jobs.size, fatal, wall) }
         }
@@ -368,10 +364,16 @@ class DownloadService : Service() {
 
     private enum class Result { OK, FAILED, BOT, CANCELLED }
 
-    private fun downloadOne(
-        item: VideoItem, format: Format, quality: Int,
-        tree: DocumentFile, existing: MutableSet<String>,
-    ): Result {
+    private fun downloadOne(item: VideoItem, format: Format, quality: Int, targets: List<Long>): Result {
+        // ¿Ya está en la biblioteca? Solo se agrega a las playlists (sin volver a bajarlo).
+        val key = "${item.platform.name.lowercase()}:${item.id}"
+        val wantVideo = format == Format.MP4 && item.platform != Platform.SPOTIFY
+        val known = runBlocking { Library.dao(this@DownloadService).byKey(key) }
+        if (known != null && (!wantVideo || known.hasVideo)) {
+            runBlocking { Library.addToPlaylists(this@DownloadService, listOf(known.id), targets) }
+            item.savedAs = "${known.title} (ya estaba)"
+            return Result.OK
+        }
         val tmp = File(cacheDir, "dl/${item.id.replace(Regex("[^A-Za-z0-9_-]"), "_")}")
         tmp.deleteRecursively(); tmp.mkdirs()
 
@@ -413,8 +415,7 @@ class DownloadService : Service() {
                 return Result.FAILED
             }
             item.phase = "Guardando…"; item.progress = 100f
-            item.savedAs = saveToTree(tree, out, format.mime, existing)
-            bytesSaved.addAndGet(out.length())
+            item.savedAs = saveToLibrary(item, key, tmp, targets)
             return Result.OK
         } catch (e: Throwable) {
             item.error = "Error al guardar: ${e.message}"
@@ -482,13 +483,14 @@ class DownloadService : Service() {
                             else if (item.platform == Platform.YOUTUBE) "${tmp.absolutePath}/%(title)s.%(ext)s"
                             else "${tmp.absolutePath}/%(uploader,channel|video)s - %(title).60B [%(id)s].%(ext)s")
             addOption("--embed-metadata")
+            addOption("--write-thumbnail")
+            addOption("--convert-thumbnails", "jpg")
             when (format) {
                 Format.MP3 -> {
                     addOption("-x")
                     addOption("--audio-format", "mp3")
                     addOption("--audio-quality", Quality.MP3_ARGS[quality])
                     addOption("--embed-thumbnail")
-                    addOption("--convert-thumbnails", "jpg")
                 }
                 Format.MP4 -> {
                     val h = Quality.MP4_HEIGHT[quality]
@@ -502,9 +504,15 @@ class DownloadService : Service() {
                         addOption("-f", "hd/sd/bv*+ba/b")
                         addOption("-S", "${res}vcodec:h264,ext:mp4:m4a")
                     } else {
+                        addOption("-f", "bv*+ba/b")
                         addOption("-S", "${res}vcodec:h264,ext:mp4:m4a")
                     }
                     addOption("--merge-output-format", "mp4")
+                    // También el audio en MP3 (oculto): con "ver video" apagado suena este.
+                    addOption("-x")
+                    addOption("--audio-format", "mp3")
+                    addOption("--audio-quality", "192K")
+                    addOption("-k")
                 }
             }
         }
@@ -545,29 +553,47 @@ class DownloadService : Service() {
         if (eta >= 0) item.etaSec = eta
     }
 
-    /** Copia el archivo a la carpeta elegida (Storage Access Framework). Evita duplicados. */
-    private fun saveToTree(tree: DocumentFile, src: File, mime: String, existing: MutableSet<String>): String {
-        val base = src.nameWithoutExtension
-        val ext = src.extension
-        val name: String
-        synchronized(existing) {
-            if (src.name in existing) {
-                val same = tree.findFile(src.name)
-                if (same != null && same.length() == src.length()) return "${src.name} (ya estaba)"
+    /** Mueve lo descargado a la biblioteca privada y lo agrega a las playlists elegidas. */
+    private fun saveToLibrary(item: VideoItem, key: String, tmp: File, targets: List<Long>): String {
+        val files = tmp.listFiles().orEmpty().filter { it.isFile && it.length() > 0 }
+        val mp3 = files.filter { it.extension.equals("mp3", true) }.maxByOrNull { it.length() }
+        val mp4 = files.filter { it.extension.equals("mp4", true) }.maxByOrNull { it.length() }
+        val jpg = files.firstOrNull { it.extension.equals("jpg", true) || it.extension.equals("jpeg", true) }
+        val safe = Library.safeKey(key)
+        fun move(src: File?, sub: String, ext: String): File? {
+            src ?: return null
+            val dst = File(Library.dir(this, sub), "$safe.$ext")
+            dst.delete()
+            if (!src.renameTo(dst)) { src.copyTo(dst, overwrite = true); src.delete() }
+            return dst
+        }
+        val audio = move(mp3, "audio", "mp3")
+        val video = move(mp4, "video", "mp4")
+        var cover = move(jpg, "covers", "jpg")
+        if (item.platform == Platform.SPOTIFY && item.thumbUrl != null) {
+            runCatching {
+                val f = File(Library.dir(this, "covers"), "$safe.jpg")
+                java.net.URL(item.thumbUrl).openStream().use { i -> f.outputStream().use { i.copyTo(it) } }
+                cover = f
             }
-            var n2 = src.name
-            var n = 2
-            while (n2 in existing) n2 = "$base ($n).$ext".also { n++ }
-            name = n2
-            existing += name    // reservar el nombre antes de copiar (otras descargas en paralelo)
         }
-        val doc = tree.createFile(mime, name) ?: throw IOException("No se pudo crear $name")
-        contentResolver.openOutputStream(doc.uri, "w")!!.use { out ->
-            src.inputStream().use { it.copyTo(out, 256 * 1024) }
+        val durMs = item.duration?.let { (it * 1000).toLong() } ?: runCatching {
+            android.media.MediaMetadataRetriever().run {
+                setDataSource((audio ?: video)!!.absolutePath)
+                val d = extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                release(); d
+            }
+        }.getOrDefault(0L)
+        bytesSaved.addAndGet((audio?.length() ?: 0) + (video?.length() ?: 0))
+        val title = item.title.ifBlank { (audio ?: video)?.nameWithoutExtension ?: "Canción" }
+        runBlocking {
+            val id = Library.upsert(this@DownloadService, Track(key = key, title = title,
+                artist = item.uploader.orEmpty(), durationMs = durMs,
+                audioPath = audio?.absolutePath, videoPath = video?.absolutePath, coverPath = cover?.absolutePath,
+                audioBytes = audio?.length() ?: 0, videoBytes = video?.length() ?: 0))
+            Library.addToPlaylists(this@DownloadService, listOf(id), targets)
         }
-        val finalName = doc.name ?: name
-        synchronized(existing) { existing += finalName }
-        return finalName
+        return title
     }
 
     private fun shortError(err: String?): String? {
@@ -652,7 +678,7 @@ class DownloadService : Service() {
         getSystemService(NotificationManager::class.java).notify(NOTIF_DONE,
             NotificationCompat.Builder(this, App.CHANNEL_DONE)
                 .setSmallIcon(R.drawable.ic_stat_download)
-                .setContentTitle("MegaDown")
+                .setContentTitle("DownSong")
                 .setContentText(msg)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(msg))
                 .setContentIntent(openAppIntent())

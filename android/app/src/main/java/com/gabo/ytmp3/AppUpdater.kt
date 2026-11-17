@@ -26,7 +26,7 @@ import java.net.URL
  */
 object AppUpdater {
     private const val REPO = "https://github.com/superprinx2/YT-MP3"
-    private const val UA = "MegaDown-Android"
+    private const val UA = "DownSong-Android"
     private const val CHECK_EVERY_MS = 12L * 60 * 60 * 1000
 
     fun currentVersion(ctx: Context): String =
@@ -62,9 +62,9 @@ object AppUpdater {
     private fun assetName(): String {
         val abis = Build.SUPPORTED_ABIS.toList()
         return when {
-            "arm64-v8a" in abis -> "MegaDown-arm64.apk"
-            "armeabi-v7a" in abis -> "MegaDown-armv7.apk"
-            else -> "MegaDown-universal.apk"
+            "arm64-v8a" in abis -> "DownSong-arm64.apk"
+            "armeabi-v7a" in abis -> "DownSong-armv7.apk"
+            else -> "DownSong-universal.apk"
         }
     }
 
@@ -110,7 +110,7 @@ object AppUpdater {
         val prefs = activity.getSharedPreferences("prefs", Context.MODE_PRIVATE)
         val now = System.currentTimeMillis()
         if (!manual && now - prefs.getLong("app_update_check", 0) < CHECK_EVERY_MS) return
-        if (manual) Toast.makeText(activity, "Buscando actualización de MegaDown…", Toast.LENGTH_SHORT).show()
+        if (manual) Toast.makeText(activity, "Buscando actualización de DownSong…", Toast.LENGTH_SHORT).show()
         activity.lifecycleScope.launch {
             val latest = try {
                 withContext(Dispatchers.IO) { latestVersion() }
@@ -127,7 +127,7 @@ object AppUpdater {
             if (!manual && prefs.getString("app_update_skipped", null) == latest) return@launch
             if (activity.isFinishing) return@launch
             MaterialAlertDialogBuilder(activity)
-                .setTitle("¡MegaDown $latest disponible! 🚀")
+                .setTitle("¡DownSong $latest disponible! 🚀")
                 .setMessage("Tienes la versión $current. La nueva se instala encima, sin perder tus ajustes.")
                 .setPositiveButton("Actualizar ahora") { _, _ -> install(activity, latest) }
                 .setNegativeButton("Más tarde") { _, _ -> prefs.edit().putString("app_update_skipped", latest).apply() }
@@ -136,9 +136,9 @@ object AppUpdater {
     }
 
     private fun install(activity: AppCompatActivity, version: String) {
-        // Android 8+: hay que permitir que MegaDown instale apps (una sola vez).
+        // Android 8+: hay que permitir que DownSong instale apps (una sola vez).
         if (Build.VERSION.SDK_INT >= 26 && !activity.packageManager.canRequestPackageInstalls()) {
-            Toast.makeText(activity, "Permite «Instalar apps desconocidas» para MegaDown y vuelve a tocar Actualizar.",
+            Toast.makeText(activity, "Permite «Instalar apps desconocidas» para DownSong y vuelve a tocar Actualizar.",
                 Toast.LENGTH_LONG).show()
             activity.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                 Uri.parse("package:${activity.packageName}")))
@@ -147,12 +147,12 @@ object AppUpdater {
         }
         val bar = LinearProgressIndicator(activity).apply { max = 100; isIndeterminate = true }
         val dialog = MaterialAlertDialogBuilder(activity)
-            .setTitle("Descargando MegaDown $version…")
+            .setTitle("Descargando DownSong $version…")
             .setView(bar.also { it.setPadding(60, 40, 60, 10) })
             .setCancelable(false)
             .show()
         val dir = File(activity.cacheDir, "apk").apply { mkdirs() }
-        val apk = File(dir, "MegaDown-$version.apk")
+        val apk = File(dir, "DownSong-$version.apk")
         activity.lifecycleScope.launch {
             try {
                 withContext(Dispatchers.IO) {

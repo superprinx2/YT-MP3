@@ -37,7 +37,9 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        Prefs2.applyTheme(this)
         createChannels()
+        Loudness.kick(this)
         scope.launch {
             try {
                 Updater.prepareBundled(this@App)

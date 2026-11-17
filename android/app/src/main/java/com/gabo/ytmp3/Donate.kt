@@ -63,7 +63,7 @@ object Donate {
             setTextColor(label)
         })
         card.addView(TextView(ctx).apply {
-            text = "MegaDown es gratis y sin anuncios. Si te ahorró tiempo (y anuncios), dona lo que quieras " +
+            text = "DownSong es gratis y sin anuncios. Si te ahorró tiempo (y anuncios), dona lo que quieras " +
                 "y ayúdame a seguir mejorándola. ¡Cualquier monto suma! 🙏"
             typeface = regular; textSize = 14f; gravity = Gravity.CENTER
             setTextColor(secondary)

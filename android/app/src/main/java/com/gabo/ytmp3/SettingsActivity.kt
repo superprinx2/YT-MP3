@@ -71,38 +71,290 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     // ------------------------------------------------------------------ construcción
+    private val section: String? get() = intent.getStringExtra(EXTRA_SECTION)
+    private val prefs2 by lazy { Prefs2(this) }
+
+    private val sections = listOf(
+        Triple("playback", "🎧", "Reproducción"),
+        Triple("appearance", "🎨", "Apariencia"),
+        Triple("lock", "🔒", "Pantalla de bloqueo"),
+        Triple("downloads", "⬇️", "Descargas"),
+        Triple("storage", "💾", "Biblioteca y almacenamiento"),
+        Triple("accounts", "👤", "Cuentas"),
+        Triple("updates", "📲", "Actualizaciones"),
+    )
+
+    private val pickPhoto = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        uri ?: return@registerForActivityResult
+        lifecycleScope.launch {
+            val f = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val raw = contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it) }
+                    ?: return@withContext null
+                val s = 512f / maxOf(raw.width, raw.height)
+                val b = if (s < 1f) android.graphics.Bitmap.createScaledBitmap(raw, (raw.width * s).toInt(), (raw.height * s).toInt(), true) else raw
+                java.io.File(filesDir, "profile.jpg").also { out -> out.outputStream().use { b.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, it) } }
+            }
+            if (f != null) { prefs2.photoPath = f.absolutePath; build() }
+        }
+    }
+
+    private fun open(s: String) = startActivity(Intent(this, SettingsActivity::class.java).putExtra(EXTRA_SECTION, s))
+
     private fun build() {
         content.removeAllViews()
-
+        val sec = section
+        val label = if (sec == null) "Ajustes" else when (sec) {
+            "profile" -> "Perfil"; "support" -> "Apoya DownSong"; "about" -> "Acerca de"
+            else -> sections.firstOrNull { it.first == sec }?.third ?: "Ajustes"
+        }
         // Barra superior: "‹ Atrás" + título grande
         content.addView(TextView(this).apply {
-            text = "‹ Atrás"
+            text = if (sec == null) "‹ Atrás" else "‹ Ajustes"
             setTextColor(color(R.color.ios_blue)); textSize = 17f; typeface = regular
             setPadding(0, dp(14f), dp(12f), dp(4f))
             setOnClickListener { it.haptic(); finish() }
         })
         content.addView(TextView(this).apply {
-            text = "Ajustes"; typeface = bold; textSize = 34f; letterSpacing = -0.02f
+            text = label; typeface = bold; textSize = 34f; letterSpacing = -0.02f
             setTextColor(color(R.color.ios_label))
             setPadding(0, 0, 0, dp(4f))
         })
 
-        buildSupport()
-        buildSpeed()
-        buildBackground()
-        buildVerification()
-        buildStats()
-        buildYtdlp()
-        buildAbout()
+        when (sec) {
+            null -> buildRoot()
+            "playback" -> buildPlayback()
+            "appearance" -> buildAppearance()
+            "lock" -> buildLock()
+            "downloads" -> { buildSpeed(); buildBackground(); buildStats() }
+            "storage" -> buildStorage()
+            "accounts" -> buildVerification()
+            "profile" -> buildProfile()
+            "updates" -> buildYtdlp()
+            "support" -> buildSupport()
+            "about" -> buildAbout()
+        }
     }
 
+    private fun buildRoot() {
+        // tarjeta de perfil
+        val pc = card()
+        pc.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14f), dp(12f), dp(14f), dp(12f))
+            setBackgroundResource(R.drawable.bg_row_single)
+            addView(ImageView(this@SettingsActivity).apply { setImageBitmap(Covers.avatarBitmap(this@SettingsActivity)) },
+                LinearLayout.LayoutParams(dp(58f), dp(58f)))
+            val t = LinearLayout(this@SettingsActivity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14f), 0, 0, 0) }
+            t.addView(TextView(this@SettingsActivity).apply {
+                text = prefs2.nickname.ifEmpty { "Tu perfil" }; typeface = semibold; textSize = 20f; setTextColor(color(R.color.ios_label))
+            })
+            t.addView(TextView(this@SettingsActivity).apply { text = "Apodo y foto"; textSize = 14f; setTextColor(color(R.color.ios_secondary)) })
+            addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(ImageView(this@SettingsActivity).apply { setImageResource(R.drawable.ic_chevron) }, LinearLayout.LayoutParams(dp(14f), dp(14f)))
+            setOnClickListener { it.haptic(); open("profile") }
+        })
+        content.addView(pc)
+        content.addView(View(this), LinearLayout.LayoutParams(1, dp(26f)))
+        val card = card()
+        sections.forEachIndexed { i, (key, emoji, name) ->
+            if (i > 0) card.addView(separator(52))
+            card.addView(row(emoji, name, "", position = when (i) { 0 -> Pos.TOP; sections.size - 1 -> Pos.BOTTOM; else -> Pos.MID }) { open(key) })
+        }
+        content.addView(card)
+        content.addView(View(this), LinearLayout.LayoutParams(1, dp(26f)))
+        val c2 = card()
+        c2.addView(row("🍔", "Tengo hambre", "Dona", valueColor = R.color.ios_orange, position = Pos.TOP) { Donate.show(this) })
+        c2.addView(separator(52))
+        c2.addView(row("ℹ️", "Acerca de", "v" + AppUpdater.currentVersion(this), position = Pos.BOTTOM) { open("about") })
+        content.addView(c2)
+    }
+
+    private fun buildPlayback() {
+        header("Transición entre canciones")
+        val card = card()
+        val valueText = TextView(this).apply { textSize = 15f; setTextColor(color(R.color.ios_secondary)) }
+        val slider = android.widget.SeekBar(this).apply {
+            max = 11; progress = prefs2.crossfadeSec - 1
+            isEnabled = prefs2.crossfadeOn
+            setPadding(dp(18f), dp(6f), dp(18f), dp(14f))
+            setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s: android.widget.SeekBar, p: Int, fromUser: Boolean) {
+                    prefs2.crossfadeSec = p + 1; valueText.text = "${p + 1} s"
+                }
+                override fun onStartTrackingTouch(s: android.widget.SeekBar) {}
+                override fun onStopTrackingTouch(s: android.widget.SeekBar) { s.haptic() }
+            })
+        }
+        valueText.text = "${prefs2.crossfadeSec} s"
+        card.addView(switchRow("Crossfade", "Funde el final de una canción con el inicio de la siguiente", prefs2.crossfadeOn) {
+            prefs2.crossfadeOn = it; slider.isEnabled = it; slider.alpha = if (it) 1f else 0.4f
+        })
+        card.addView(separator(14))
+        card.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14f), dp(10f), dp(14f), 0)
+            addView(TextView(this@SettingsActivity).apply { text = "Duración del fundido"; textSize = 16f; setTextColor(color(R.color.ios_label)) },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(valueText)
+        })
+        slider.alpha = if (prefs2.crossfadeOn) 1f else 0.4f
+        card.addView(slider)
+        content.addView(card)
+        footer("De 1 a 12 segundos. Así no sientes la pausa entre canción y canción.")
+
+        header("Volumen")
+        val c2 = card()
+        c2.addView(switchRow("Nivelar volumen", "Todas las canciones suenan con el mismo volumen", prefs2.normalize) {
+            prefs2.normalize = it
+        })
+        content.addView(c2)
+        footer("Evita que una canción o video suene mucho más fuerte o más bajo que el resto.")
+    }
+
+    private fun buildAppearance() {
+        header("Tema")
+        val card = card()
+        AppTheme.entries.forEachIndexed { i, t ->
+            if (i > 0) card.addView(separator(14))
+            val sub = when (t) {
+                AppTheme.LIGHT -> "Fondo claro"; AppTheme.DARK -> "Fondo oscuro"
+                AppTheme.SYSTEM -> "Sigue el modo claro u oscuro del celular"
+                AppTheme.DYNAMIC -> "Los colores cambian con la portada de la canción que suena"
+            }
+            card.addView(checkRow(t.label, sub, prefs2.theme == t,
+                when (i) { 0 -> Pos.TOP; AppTheme.entries.size - 1 -> Pos.BOTTOM; else -> Pos.MID }) {
+                prefs2.theme = t; Prefs2.applyTheme(this); build()
+            })
+        }
+        content.addView(card)
+
+        header("Portadas")
+        val c2 = card()
+        c2.addView(switchRow("Canciones sin portada: efecto caleidoscopio", "Figuras de colores que se mueven con la música", prefs2.kaleidoNoCover) {
+            prefs2.kaleidoNoCover = it
+        })
+        c2.addView(separator(14))
+        c2.addView(switchRow("Caleidoscopio en todas mis canciones", "Usa el efecto incluso en las que tienen portada", prefs2.kaleidoAll) {
+            prefs2.kaleidoAll = it
+        })
+        content.addView(c2)
+        footer("El caleidoscopio cambia de forma y de color al ritmo de la canción.")
+    }
+
+    private fun buildLock() {
+        header("Pantalla de bloqueo")
+        val card = card()
+        card.addView(switchRow("Botones aleatorio y repetir", "Además de anterior, pausa y siguiente", prefs2.lockButtons) {
+            prefs2.lockButtons = it; PlaybackService.instance?.refreshButtons()
+        })
+        content.addView(card)
+        footer("Con la pantalla bloqueada o la app minimizada ves qué canción suena, con su portada, y puedes pasar " +
+            "de canción. Algunos celulares (Samsung, Xiaomi…) muestran además la portada de fondo; el diseño exacto lo pone Android.")
+    }
+
+    private fun buildStorage() {
+        header("Espacio usado")
+        val card = card()
+        content.addView(card)
+        val per = card()
+        lifecycleScope.launch {
+            val dao = Library.dao(this@SettingsActivity)
+            val audio = dao.totalAudio(); val video = dao.totalVideo()
+            val sizes = dao.sizes()
+            card.addView(row("🎵", "Canciones (audio)", Util.fmtBytes(audio), position = Pos.TOP, chevron = false) {})
+            card.addView(separator(52))
+            card.addView(row("🎬", "Videos", Util.fmtBytes(video), position = Pos.MID, chevron = false) {})
+            card.addView(separator(52))
+            card.addView(row("🗑️", "Borrar todos los videos", "", labelColor = R.color.ios_red, position = Pos.BOTTOM) {
+                confirmDeleteVideos(null, "todos los videos", video)
+            })
+            if (sizes.isNotEmpty()) {
+                header("Por playlist")
+                sizes.forEachIndexed { i, s ->
+                    if (i > 0) per.addView(separator(14))
+                    per.addView(row("", "${s.name} · ${s.count}", Util.fmtBytes(s.audio + s.video),
+                        position = when { sizes.size == 1 -> Pos.SINGLE; i == 0 -> Pos.TOP; i == sizes.size - 1 -> Pos.BOTTOM; else -> Pos.MID }) {
+                        if (s.video > 0) confirmDeleteVideos(s.id, "los videos de «${s.name}»", s.video)
+                        else toast("«${s.name}» no tiene videos guardados")
+                    })
+                }
+                content.addView(per)
+                footer("Toca una playlist para borrar sus videos y liberar espacio. El audio se conserva.")
+            }
+            header("Música del celular")
+            val c3 = card()
+            c3.addView(row("📥", "Agregar música del celular", "", position = Pos.SINGLE) { ImportSheet.start(this@SettingsActivity, null) })
+            content.addView(c3)
+            footer("La música del celular se lee en su lugar: no se copia ni ocupa espacio extra.")
+        }
+    }
+
+    private fun confirmDeleteVideos(pid: Long?, what: String, bytes: Long) {
+        ActionSheet.show(this, "¿Borrar $what? Liberas ${Util.fmtBytes(bytes)}. Las canciones se siguen escuchando (solo audio).",
+            listOf("Borrar videos"), destructive = setOf(0)) {
+            lifecycleScope.launch {
+                val freed = Library.deleteVideos(this@SettingsActivity, pid)
+                toast("Liberaste ${Util.fmtBytes(freed)} ✓"); build()
+            }
+        }
+    }
+
+    private fun buildProfile() {
+        val card = card()
+        card.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(0, dp(22f), 0, dp(18f))
+            addView(ImageView(this@SettingsActivity).apply { setImageBitmap(Covers.avatarBitmap(this@SettingsActivity)) },
+                LinearLayout.LayoutParams(dp(110f), dp(110f)))
+            addView(TextView(this@SettingsActivity).apply {
+                text = prefs2.nickname; typeface = bold; textSize = 22f; setTextColor(color(R.color.ios_label)); gravity = Gravity.CENTER
+                setPadding(0, dp(12f), 0, 0)
+            })
+        })
+        content.addView(card)
+        content.addView(View(this), LinearLayout.LayoutParams(1, dp(22f)))
+        val c2 = card()
+        c2.addView(row("✏️", "Apodo", prefs2.nickname, position = Pos.TOP) {
+            PlaylistPicker.askName(this, "Tu apodo", prefs2.nickname, 20) { prefs2.nickname = it; build() }
+        })
+        c2.addView(separator(52))
+        val hasPhoto = prefs2.photoPath != null
+        c2.addView(row("📷", if (hasPhoto) "Cambiar foto" else "Elegir foto", "", position = if (hasPhoto) Pos.MID else Pos.BOTTOM) {
+            pickPhoto.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        })
+        if (hasPhoto) {
+            c2.addView(separator(52))
+            c2.addView(row("🌀", "Usar avatar caleidoscopio", "", position = Pos.BOTTOM) { prefs2.photoPath = null; build() })
+        }
+        content.addView(c2)
+        footer("Tu perfil solo vive en este celular.")
+    }
+
+    private fun checkRow(label: String, sub: String, checked: Boolean, position: Pos, onClick: () -> Unit) =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14f), dp(10f), dp(14f), dp(10f))
+            setBackgroundResource(when (position) {
+                Pos.TOP -> R.drawable.bg_row_top; Pos.MID -> R.drawable.bg_row_mid
+                Pos.BOTTOM -> R.drawable.bg_row_bottom; Pos.SINGLE -> R.drawable.bg_row_single
+            })
+            val texts = LinearLayout(this@SettingsActivity).apply { orientation = LinearLayout.VERTICAL }
+            texts.addView(TextView(this@SettingsActivity).apply { text = label; textSize = 16f; setTextColor(color(R.color.ios_label)) })
+            texts.addView(TextView(this@SettingsActivity).apply { text = sub; textSize = 12f; setTextColor(color(R.color.ios_secondary)) })
+            addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            if (checked) addView(ImageView(this@SettingsActivity).apply {
+                setImageResource(R.drawable.ic_check); setColorFilter(BRAND_RED)
+            }, LinearLayout.LayoutParams(dp(22f), dp(22f)))
+            setOnClickListener { it.haptic(); onClick() }
+        }
+
     private fun buildSupport() {
-        header("Apoya MegaDown")
+        header("Apoya DownSong")
         val card = card()
         card.addView(row("🍔", "Tengo hambre", "Dona", valueColor = R.color.ios_orange,
             position = Pos.SINGLE) { Donate.show(this) })
         content.addView(card)
-        footer("MegaDown es gratis y sin anuncios. Puedes apoyarla con Yape, Plin o una transferencia al BCP.")
+        footer("DownSong es gratis y sin anuncios. Puedes apoyarla con Yape, Plin o una transferencia al BCP.")
     }
 
     private fun buildSpeed() {
@@ -236,7 +488,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun buildYtdlp() {
         header("Actualizaciones")
         val appCard = card()
-        appCard.addView(row("📲", "Actualizar MegaDown", "v" + AppUpdater.currentVersion(this),
+        appCard.addView(row("📲", "Actualizar DownSong", "v" + AppUpdater.currentVersion(this),
             position = Pos.SINGLE) { AppUpdater.check(this, manual = true) })
         content.addView(appCard)
         footer("La app revisa GitHub sola al abrirse y te avisa si hay una versión nueva.")
@@ -269,17 +521,13 @@ class SettingsActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(dp(16f), dp(22f), dp(16f), dp(20f))
         }
-        box.addView(FrameLayout(this).apply {
-            background = ContextCompat.getDrawable(this@SettingsActivity, R.drawable.ic_launcher_bg_round)
+        box.addView(ImageView(this).apply {
+            setImageResource(R.drawable.logo_downsong)
             elevation = dp(4f).toFloat()
-            addView(ImageView(this@SettingsActivity).apply {
-                setImageResource(R.drawable.ic_launcher_fg)
-                layoutParams = FrameLayout.LayoutParams(dp(84f), dp(84f))
-            })
             layoutParams = LinearLayout.LayoutParams(dp(84f), dp(84f))
         })
         box.addView(TextView(this).apply {
-            text = "MegaDown"; typeface = bold; textSize = 22f; setTextColor(color(R.color.ios_label))
+            text = "DownSong"; typeface = bold; textSize = 22f; setTextColor(color(R.color.ios_label))
             setPadding(0, dp(12f), 0, 0)
         })
         val v = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: "?"
@@ -436,6 +684,8 @@ class SettingsActivity : AppCompatActivity() {
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_LONG).show()
 
     companion object {
+        const val EXTRA_SECTION = "section"
+
         /** Pide a Android que no limite la app por batería (descargas con pantalla bloqueada). */
         @SuppressLint("BatteryLife")
         fun requestBatteryExemption(a: AppCompatActivity) {

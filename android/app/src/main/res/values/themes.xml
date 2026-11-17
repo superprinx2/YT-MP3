@@ -24,6 +24,14 @@
         <item name="materialAlertDialogTheme">@style/IosAlert</item>
     </style>
 
+    <style name="Theme.DownSong.Launch" parent="Theme.YTMP3">
+        <item name="android:windowBackground">@drawable/splash_bg</item>
+        <item name="android:statusBarColor">#000000</item>
+        <item name="android:navigationBarColor">#000000</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+
     <style name="IosAlert" parent="ThemeOverlay.Material3.MaterialAlertDialog">
         <item name="colorPrimary">@color/ios_blue</item>
         <item name="colorSurface">@color/ios_card</item>

@@ -1,5 +1,6 @@
-# MegaDown
+# DownSong (antes MegaDown)
 
+Tu música sin anuncios ni suscripciones: **biblioteca y reproductor** al estilo Spotify, con el descargador integrado.
 Descarga música y videos de **YouTube, TikTok, Instagram, Facebook y Spotify** sin anuncios, en Android (y YouTube en Windows).
 Por dentro usa [yt-dlp](https://github.com/yt-dlp/yt-dlp) + FFmpeg: todo se procesa en tu equipo, sin pasar por servidores de terceros.
 
@@ -13,15 +14,21 @@ Por dentro usa [yt-dlp](https://github.com/yt-dlp/yt-dlp) + FFmpeg: todo se proc
 
 | APK | Para | Enlace directo |
 |---|---|---|
-| **arm64** (recomendado) | La mayoría de teléfonos desde 2017 | [MegaDown-arm64.apk](https://github.com/superprinx2/YT-MP3/releases/latest/download/MegaDown-arm64.apk) |
-| armv7 | Teléfonos antiguos de 32 bits | [MegaDown-armv7.apk](https://github.com/superprinx2/YT-MP3/releases/latest/download/MegaDown-armv7.apk) |
-| universal | Cualquier dispositivo (más pesado) | [MegaDown-universal.apk](https://github.com/superprinx2/YT-MP3/releases/latest/download/MegaDown-universal.apk) |
+| **arm64** (recomendado) | La mayoría de teléfonos desde 2017 | [DownSong-arm64.apk](https://github.com/superprinx2/YT-MP3/releases/latest/download/DownSong-arm64.apk) |
+| armv7 | Teléfonos antiguos de 32 bits | [DownSong-armv7.apk](https://github.com/superprinx2/YT-MP3/releases/latest/download/DownSong-armv7.apk) |
+| universal | Cualquier dispositivo (más pesado) | [DownSong-universal.apk](https://github.com/superprinx2/YT-MP3/releases/latest/download/DownSong-universal.apk) |
 
 Ábrelo en el teléfono y acepta **«Instalar apps desconocidas»**. Requiere Android 8.0 o superior.
 Todas las versiones están en [Releases](https://github.com/superprinx2/YT-MP3/releases).
 
 ## Funciones
 
+- **Biblioteca y playlists**: cada canción se guarda una sola vez; las playlists apuntan a ella. Nombre y portada editables.
+- **Reproductor** al estilo Spotify: fondo con el color de la portada, aleatorio, repetir, deslizar para cambiar de canción, video opcional.
+- **Segundo plano y pantalla de bloqueo** con anterior, pausa, siguiente, aleatorio y repetir.
+- **Crossfade** (1 a 12 s), **nivelar volumen**, temas claro, oscuro, sistema y dinámico.
+- **Caleidoscopio** animado al ritmo de la música para las canciones sin portada.
+- **Música del celular**: agrégala a tus playlists sin copiarla.
 - **Cinco plataformas** con pestañas: **YouTube**, **TikTok**, **Instagram**, **Facebook** y **Spotify**. Al pegar un enlace la app cambia sola de pestaña.
 - **TikTok**: video MP4 **sin marca de agua** o solo el audio en MP3.
 - **Instagram**: reels y videos de publicaciones en MP4 o MP3.
@@ -31,7 +38,7 @@ Todas las versiones están en [Releases](https://github.com/superprinx2/YT-MP3/r
   Spotify muestra hasta 100 canciones por enlace.
 - **No hace falta iniciar sesión.** Solo si una plataforma lo exige (o pide «confirma que no eres un robot»),
   la app pausa, te avisa y te deja hacerlo dentro de la app; queda guardado solo en el teléfono.
-- Pega un enlace de **video o playlist** (o usa **Compartir → YT MP3** desde YouTube, TikTok, Instagram o Facebook).
+- Pega un enlace de **video o playlist** (o usa **Compartir → DownSong** desde YouTube, TikTok, Instagram o Facebook).
 - **MP3** (audio, con portada y etiquetas) o **MP4** (video H.264), con selección de calidad.
 - **Playlists completas**: detecta todos los videos, eliges cuáles con casillas y los baja todos.
 - **Modo Ultra ⚡**: varias descargas a la vez según la memoria y núcleos del teléfono (hasta 8).
