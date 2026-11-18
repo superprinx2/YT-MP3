@@ -159,7 +159,7 @@ class LibraryFragment : Fragment() {
         addView(c.text("Descargar música", 16f, Color.WHITE, 1).apply {
             gravity = Gravity.CENTER; minHeight = c.dp(48)
             background = roundRect(BRAND_RED, c.dp(24).toFloat()); setPadding(c.dp(24), 0, c.dp(24), 0)
-            pressable(); setOnClickListener { it.haptic(); (activity as? MainActivity)?.selectTab(1) }
+            pressable(); setOnClickListener { it.haptic(); (activity as? MainActivity)?.selectTab(2) }
         }, lp(WRAP, WRAP).apply { topMargin = c.dp(20) })
         addView(c.text("Agregar música del celular", 16f, c.col(R.color.ios_label), 1).apply {
             gravity = Gravity.CENTER; minHeight = c.dp(48)
@@ -177,11 +177,6 @@ class LibraryFragment : Fragment() {
             setPadding(c.dp(6), c.dp(4), c.dp(6), c.dp(4)); gravity = Gravity.CENTER
             setOnClickListener { SettingsActivity.copyHandle(act, it) }
         })
-        addView(c.text("🍔 Tengo hambre · Dona", 15f, Color.WHITE, 1).apply {
-            gravity = Gravity.CENTER; minHeight = c.dp(44)
-            setBackgroundResource(R.drawable.bg_chip_ultra); setPadding(c.dp(20), 0, c.dp(20), 0)
-            pressable(); setOnClickListener { it.haptic(); Donate.show(act) }
-        }, lp(WRAP, WRAP).apply { topMargin = c.dp(12) })
     }
 }
 

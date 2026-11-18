@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -24,14 +25,38 @@
             android:importantForAccessibility="no"
             android:src="@drawable/ic_circle_check" />
 
-        <ImageView
-            android:id="@+id/thumb"
-            android:layout_width="80dp"
-            android:layout_height="45dp"
-            android:layout_marginStart="12dp"
-            android:background="@drawable/bg_thumb"
-            android:importantForAccessibility="no"
-            android:scaleType="centerCrop" />
+        <FrameLayout
+            android:layout_width="96dp"
+            android:layout_height="54dp"
+            android:layout_marginStart="12dp">
+
+            <ImageView
+                android:id="@+id/thumb"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@drawable/bg_thumb"
+                android:importantForAccessibility="no"
+                android:scaleType="centerCrop" />
+
+            <!-- Vista previa: solo cuenta el toque sobre el botón -->
+            <ImageView
+                android:id="@+id/previewBtn"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:layout_gravity="center"
+                android:background="@drawable/bg_preview_btn"
+                android:contentDescription="Escuchar vista previa"
+                android:padding="7dp"
+                android:src="@drawable/ic_play" />
+
+            <ProgressBar
+                android:id="@+id/previewSpin"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:layout_gravity="center"
+                android:indeterminateTint="#FFFFFF"
+                android:visibility="gone" />
+        </FrameLayout>
 
         <LinearLayout
             android:id="@+id/textBox"
@@ -70,12 +95,23 @@
                 android:progressDrawable="@drawable/bg_mini_progress"
                 android:visibility="gone" />
         </LinearLayout>
+
+        <ImageView
+            android:id="@+id/videoBtn"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="4dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Ver video"
+            android:padding="9dp"
+            android:src="@drawable/ic_videocam"
+            app:tint="@color/ios_secondary" />
     </LinearLayout>
 
     <View
         android:id="@+id/separator"
         android:layout_width="match_parent"
         android:layout_height="0.5dp"
-        android:layout_marginStart="128dp"
+        android:layout_marginStart="144dp"
         android:background="@color/ios_separator" />
 </LinearLayout>

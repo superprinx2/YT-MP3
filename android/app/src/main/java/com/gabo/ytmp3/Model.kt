@@ -346,7 +346,7 @@ object Util {
                 if (platform != Platform.YOUTUBE) continue
                 url = "https://www.youtube.com/watch?v=$id"
             }
-            val up = e.optString("uploader").ifEmpty { null }
+            val up = e.optString("uploader").ifEmpty { e.optString("channel") }.ifEmpty { null }
             val title = cleanTitle(e.optString("title").ifEmpty { id }, up, platform)
             val unavailable = title == "[Private video]" || title == "[Deleted video]"
             list += VideoItem(id, title, url, e.optDouble("duration").takeIf { !it.isNaN() },

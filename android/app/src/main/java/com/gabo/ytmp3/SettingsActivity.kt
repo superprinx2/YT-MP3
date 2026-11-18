@@ -163,9 +163,7 @@ class SettingsActivity : AppCompatActivity() {
         content.addView(card)
         content.addView(View(this), LinearLayout.LayoutParams(1, dp(26f)))
         val c2 = card()
-        c2.addView(row("🍔", "Tengo hambre", "Dona", valueColor = R.color.ios_orange, position = Pos.TOP) { Donate.show(this) })
-        c2.addView(separator(52))
-        c2.addView(row("ℹ️", "Acerca de", "v" + AppUpdater.currentVersion(this), position = Pos.BOTTOM) { open("about") })
+        c2.addView(row("ℹ️", "Acerca de", "v" + AppUpdater.currentVersion(this), position = Pos.SINGLE) { open("about") })
         content.addView(c2)
     }
 
@@ -247,7 +245,14 @@ class SettingsActivity : AppCompatActivity() {
         card.addView(switchRow("Botones aleatorio y repetir", "Además de anterior, pausa y siguiente", prefs2.lockButtons) {
             prefs2.lockButtons = it; PlaybackService.instance?.refreshButtons()
         })
+        card.addView(separator(14))
+        card.addView(row("🔔", "Ajustes de notificaciones", "", position = Pos.BOTTOM) {
+            startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+        })
         content.addView(card)
+        footer("¿No ves la música en la pantalla de bloqueo? Toca «Ajustes de notificaciones» y activa " +
+            "«Reproducción de música» y «Pantalla de bloqueo». En Xiaomi activa también «Mostrar en pantalla de bloqueo»; " +
+            "en Samsung, Ajustes › Pantalla de bloqueo › Notificaciones › Mostrar contenido.")
         footer("Con la pantalla bloqueada o la app minimizada ves qué canción suena, con su portada, y puedes pasar " +
             "de canción. Algunos celulares (Samsung, Xiaomi…) muestran además la portada de fondo; el diseño exacto lo pone Android.")
     }

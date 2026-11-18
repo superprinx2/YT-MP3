@@ -18,6 +18,7 @@ class App : Application() {
         const val CHANNEL_PROGRESS = "progress"
         const val CHANNEL_DONE = "done"
         const val CHANNEL_ALERT = "alert"
+        const val CHANNEL_PLAYBACK = "playback"
         private const val TAG = "YTMP3"
 
         /** Cada cuánto se comprueba si hay un yt-dlp nuevo antes de buscar/descargar. */
@@ -63,6 +64,13 @@ class App : Application() {
         )
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_DONE, "Descargas terminadas", NotificationManager.IMPORTANCE_DEFAULT)
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_PLAYBACK, "Reproducción de música", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                setSound(null, null); enableVibration(false); setShowBadge(false)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+                description = "Controles de la canción en la notificación y la pantalla de bloqueo"
+            }
         )
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_ALERT, "Avisos (verificación, calor)", NotificationManager.IMPORTANCE_HIGH)

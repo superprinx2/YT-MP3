@@ -36,7 +36,8 @@ class PlaylistFragment : Fragment(), AccentAware {
     }
 
     private val pid get() = requireArguments().getLong("id")
-    private val isAll get() = pid == -1L
+    private val isAll get() = pid < 0
+    private val virtualName get() = when (pid) { -2L -> "Más escuchadas"; -3L -> "Archivos locales"; else -> "Todas las canciones" }
     private val act get() = requireActivity() as AppCompatActivity
     private var playlist: Playlist? = null
     private var tracks: List<Track> = emptyList()
@@ -61,13 +62,13 @@ class PlaylistFragment : Fragment(), AccentAware {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 val dao = Library.dao(c)
                 launch {
-                    val pf: Flow<Playlist?> = if (isAll) flowOf(Playlist(id = -1, name = "Todas las canciones")) else dao.playlistFlow(pid)
+                    val pf: Flow<Playlist?> = if (isAll) flowOf(Playlist(id = pid, name = virtualName)) else dao.playlistFlow(pid)
                     pf.collect { p ->
                         if (p == null) { parentFragmentManager.popBackStack(); return@collect }
                         playlist = p; adapter.notifyItemChanged(0); loadHeaderColor()
                     }
                 }
-                (if (isAll) dao.allTracks() else dao.tracksOf(pid)).collect { t ->
+                (when (pid) { -1L -> dao.allTracks(); -2L -> dao.topTracks(); -3L -> dao.localTracks(); else -> dao.tracksOf(pid) }).collect { t ->
                     tracks = t; adapter.notifyDataSetChanged(); loadHeaderColor()
                 }
             }
@@ -98,14 +99,14 @@ class PlaylistFragment : Fragment(), AccentAware {
         if (tracks.isEmpty()) return
         val list = tracks
         PlayerHub.with(act) { s ->
-            s.play(list, index, if (isAll) null else p.id, p.name, p.showVideo, shuffleStart = shuffle)
+            s.play(list, index, p.id, p.name, p.showVideo, shuffleStart = shuffle)
             if (!shuffle) (activity as? MainActivity)?.openPlayer()
         }
     }
 
     private fun isThisPlaying(): Boolean {
         val s = PlayerHub.service ?: return false
-        return s.current() != null && (s.playlistId == pid || (isAll && s.playlistId == null))
+        return s.current() != null && s.playlistId == pid
     }
 
     private fun toggleVideo() {
@@ -270,7 +271,7 @@ class PlaylistFragment : Fragment(), AccentAware {
             }
         }, lp(c.dp(56), c.dp(56)).apply { marginStart = c.dp(8) })
         box.addView(actions)
-        if (tracks.isEmpty()) box.addView(c.text(if (isAll) "Aún no tienes canciones." else
+        if (tracks.isEmpty()) box.addView(c.text(if (pid == -2L) "Escucha música y tus canciones más escuchadas aparecerán aquí." else if (pid == -3L) "Agrega música del celular desde Ajustes › Biblioteca y almacenamiento." else if (isAll) "Aún no tienes canciones." else
             "Esta playlist está vacía. Toca ＋ para agregar música del celular, o descarga canciones y elige esta playlist.",
             14f, c.col(R.color.ios_secondary), 0, 0).apply { gravity = Gravity.CENTER; setPadding(c.dp(32), c.dp(24), c.dp(32), c.dp(24)) })
     }

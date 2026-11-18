@@ -149,6 +149,9 @@ class PlaybackService : MediaSessionService() {
             Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_OPEN_PLAYER, true)
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        // Canal propio con importancia normal (sin sonido): así también se ve en la pantalla de bloqueo.
+        setMediaNotificationProvider(androidx.media3.session.DefaultMediaNotificationProvider.Builder(this)
+            .setChannelId(App.CHANNEL_PLAYBACK).setChannelName(R.string.channel_playback).build())
         session = MediaSession.Builder(this, active)
             .setSessionActivity(open)
             .setCallback(SessionCallback())
@@ -157,7 +160,54 @@ class PlaybackService : MediaSessionService() {
         instance = this
         handler.post(tick)
         notifyUi()
+        restore()
     }
+
+    // ------------------------------------------------------------------ recordar lo último que sonaba
+    private fun save() {
+        if (queue.isEmpty()) return
+        prefs.qIds = queue.map { it.id }
+        prefs.qIndex = active.currentMediaItemIndex
+        prefs.qPos = active.currentPosition
+        prefs.qPlaylist = playlistId ?: Long.MIN_VALUE
+        prefs.qName = playlistName
+        prefs.qVideo = showVideo
+    }
+
+    private fun restore() {
+        val ids = prefs.qIds
+        if (ids.isEmpty() || queue.isNotEmpty()) return
+        App.scope.launch {
+            val map = Library.dao(this@PlaybackService).tracksByIds(ids).associateBy { it.id }
+            val list = ids.mapNotNull { map[it] }
+            if (list.isEmpty()) return@launch
+            handler.post {
+                if (queue.isNotEmpty() || instance == null) return@post
+                queue = list
+                playlistId = prefs.qPlaylist.takeIf { it != Long.MIN_VALUE }
+                playlistName = prefs.qName; showVideo = prefs.qVideo
+                val idx = prefs.qIndex.coerceIn(list.indices)
+                val items = list.map(::item)
+                val seed = SystemClock.elapsedRealtime()
+                for (p in listOf(p1, p2)) {
+                    p.setMediaItems(items, idx, if (p === active) prefs.qPos else 0)
+                    p.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(items.size, seed))
+                }
+                active.volume = volFor(list[idx]); applyBoost(active, list[idx])
+                active.playWhenReady = false
+                active.prepare()
+                notifyUi()
+            }
+        }
+    }
+
+    private fun bump(t: Track?) {
+        t ?: return
+        val now = System.currentTimeMillis()
+        App.scope.launch { runCatching { Library.dao(this@PlaybackService).bump(t.id, now) } }
+    }
+
+    private var saveTicks = 0
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = session
 
@@ -166,6 +216,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        save()
         instance = null
         handler.removeCallbacksAndMessages(null)
         session.release()
@@ -210,6 +261,7 @@ class PlaybackService : MediaSessionService() {
         applyBoost(active, tracks[idx])
         active.prepare()
         active.play()
+        bump(tracks[idx]); save()
         notifyUi()
     }
 
@@ -280,6 +332,7 @@ class PlaybackService : MediaSessionService() {
     private val tick = object : Runnable {
         override fun run() {
             try { step() } catch (e: Exception) { Log.w(TAG, "tick", e) }
+            if (++saveTicks >= 40) { saveTicks = 0; if (active.isPlaying) save() }
             handler.postDelayed(this, if (fading) 50 else 250)
         }
     }
@@ -331,6 +384,7 @@ class PlaybackService : MediaSessionService() {
         inc.volume = volFor(trackOf(inc))
         session.player = inc
         updateButtons()
+        bump(trackOf(inc)); save()
         notifyUi()
     }
 
@@ -352,16 +406,28 @@ class PlaybackService : MediaSessionService() {
             if (p === active) {
                 val t = trackOf(p)
                 p.volume = volFor(t); applyBoost(p, t)
+                if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) { bump(t); save() }
                 notifyUi()
             }
         }
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (p === active) {
                 if (!isPlaying && fading && !p.playWhenReady) { other.pause(); cancelFade() }
+                if (!isPlaying) save()
                 notifyUi()
             }
         }
-        override fun onPlaybackStateChanged(playbackState: Int) { if (p === active) notifyUi() }
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            if (p !== active) return
+            // Con aleatorio activado la música sigue: al terminar se vuelve a mezclar y continúa.
+            if (playbackState == Player.STATE_ENDED && p.shuffleModeEnabled && p.mediaItemCount > 1) {
+                val seed = SystemClock.elapsedRealtime()
+                for (q in listOf(p1, p2)) q.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(q.mediaItemCount, seed))
+                p.seekTo(p.currentTimeline.getFirstWindowIndex(true), 0)
+                p.play()
+            }
+            notifyUi()
+        }
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
             if (p === active && other.shuffleModeEnabled != shuffleModeEnabled) {
                 prefs.shuffle = shuffleModeEnabled; other.shuffleModeEnabled = shuffleModeEnabled; updateButtons(); notifyUi()

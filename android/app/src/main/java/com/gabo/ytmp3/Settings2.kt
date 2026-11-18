@@ -32,6 +32,16 @@ class Prefs2(ctx: Context) {
         get() = sp.getStringSet("last_pl", emptySet())!!.mapNotNull { it.toLongOrNull() }.toSet()
         set(v) = sp.edit().putStringSet("last_pl", v.map { it.toString() }.toSet()).apply()
 
+    // Última cola (para retomar al abrir la app)
+    var qIds: List<Long>
+        get() = sp.getString("q_ids", "")!!.split(',').mapNotNull { it.toLongOrNull() }
+        set(v) = sp.edit().putString("q_ids", v.joinToString(",")).apply()
+    var qIndex: Int get() = sp.getInt("q_idx", 0); set(v) = sp.edit().putInt("q_idx", v).apply()
+    var qPos: Long get() = sp.getLong("q_pos", 0); set(v) = sp.edit().putLong("q_pos", v).apply()
+    var qPlaylist: Long get() = sp.getLong("q_pl", Long.MIN_VALUE); set(v) = sp.edit().putLong("q_pl", v).apply()
+    var qName: String get() = sp.getString("q_name", "") ?: ""; set(v) = sp.edit().putString("q_name", v).apply()
+    var qVideo: Boolean get() = b("q_video", false); set(v) = setB("q_video", v)
+
     companion object {
         fun applyTheme(ctx: Context) {
             AppCompatDelegate.setDefaultNightMode(when (Prefs2(ctx).theme) {

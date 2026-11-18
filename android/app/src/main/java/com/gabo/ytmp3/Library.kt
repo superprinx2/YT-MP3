@@ -4,6 +4,7 @@ import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
@@ -42,6 +43,8 @@ data class Track(
     val addedAt: Long = System.currentTimeMillis(),
     val audioBytes: Long = 0,
     val videoBytes: Long = 0,
+    @ColumnInfo(defaultValue = "0") val playCount: Int = 0,
+    @ColumnInfo(defaultValue = "0") val lastPlayed: Long = 0,
 ) {
     val isLocal get() = localUri != null
     val hasVideo get() = videoPath != null && File(videoPath).exists()
@@ -104,6 +107,11 @@ interface LibDao {
     @Query("DELETE FROM tracks WHERE id = :id") suspend fun deleteTrack(id: Long)
     @Query("DELETE FROM playlist_tracks WHERE trackId = :id") suspend fun unlinkTrack(id: Long)
     @Query("SELECT * FROM tracks WHERE gainDb IS NULL LIMIT 20") suspend fun needGain(): List<Track>
+    @Query("SELECT * FROM tracks WHERE playCount > 0 ORDER BY playCount DESC, lastPlayed DESC LIMIT 50") fun topTracks(): Flow<List<Track>>
+    @Query("SELECT * FROM tracks WHERE localUri IS NOT NULL ORDER BY title COLLATE NOCASE") fun localTracks(): Flow<List<Track>>
+    @Query("SELECT * FROM tracks WHERE lastPlayed > 0 ORDER BY lastPlayed DESC LIMIT 20") fun recentTracks(): Flow<List<Track>>
+    @Query("UPDATE tracks SET playCount = playCount + 1, lastPlayed = :now WHERE id = :id") suspend fun bump(id: Long, now: Long)
+    @Query("SELECT * FROM tracks WHERE id IN (:ids)") suspend fun tracksByIds(ids: List<Long>): List<Track>
 
     @Query("SELECT COALESCE(MAX(position), -1) FROM playlist_tracks WHERE playlistId = :pid") suspend fun maxPos(pid: Long): Int
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun link(x: PlaylistTrack): Long
@@ -118,16 +126,23 @@ interface LibDao {
     @Query("SELECT COALESCE(SUM(videoBytes), 0) FROM tracks") suspend fun totalVideo(): Long
 }
 
-@Database(entities = [Track::class, Playlist::class, PlaylistTrack::class], version = 1, exportSchema = false)
+@Database(entities = [Track::class, Playlist::class, PlaylistTrack::class], version = 2, exportSchema = false)
 abstract class LibDb : RoomDatabase() {
     abstract fun dao(): LibDao
+}
+
+private val M1_2 = object : androidx.room.migration.Migration(1, 2) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE tracks ADD COLUMN playCount INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE tracks ADD COLUMN lastPlayed INTEGER NOT NULL DEFAULT 0")
+    }
 }
 
 object Library {
     @Volatile private var db: LibDb? = null
 
     fun dao(ctx: Context): LibDao = (db ?: synchronized(this) {
-        db ?: Room.databaseBuilder(ctx.applicationContext, LibDb::class.java, "library.db").build().also { db = it }
+        db ?: Room.databaseBuilder(ctx.applicationContext, LibDb::class.java, "library.db").addMigrations(M1_2).build().also { db = it }
     }).dao()
 
     fun dir(ctx: Context, sub: String) = File(ctx.filesDir, "library/$sub").apply { mkdirs() }

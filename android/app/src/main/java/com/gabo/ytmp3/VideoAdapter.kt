@@ -21,14 +21,20 @@ import com.gabo.ytmp3.databinding.ItemVideoBinding
 class VideoAdapter(
     private val items: List<VideoItem>,
     private val onToggle: () -> Unit,
+    private val onPreview: (VideoItem) -> Unit = {},
+    private val onVideo: (VideoItem) -> Unit = {},
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     var locked = false   // durante la descarga no se puede cambiar la selección
+    /** Vista previa en curso: qué fila, si está cargando y cuánto avanzó (0..1). */
+    var previewing: VideoItem? = null
+    var previewLoading = false
+    var previewFrac = 0f
 
     private class Row(val b: ItemVideoBinding) : RecyclerView.ViewHolder(b.root)
     private class Big(val b: ItemVideoBigBinding) : RecyclerView.ViewHolder(b.root)
 
-    override fun getItemViewType(position: Int) = if (items.size == 1) 2 else 1
+    override fun getItemViewType(position: Int) = 1
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
         val inf = LayoutInflater.from(parent.context)
@@ -87,7 +93,18 @@ class VideoAdapter(
         b.check.alpha = if (locked) 0.45f else 1f
         loadThumb(b.thumb, it.thumbnail, 8f)
         b.thumb.alpha = if (it.checked || it.status != Status.PENDING) 1f else 0.5f
-        bindStatus(it, b.subtitle, b.miniProgress, Util.fmtDuration(it.duration))
+        bindStatus(it, b.subtitle, b.miniProgress, listOfNotNull(it.uploader, Util.fmtDuration(it.duration).ifEmpty { null }).joinToString(" · "))
+        val pv = previewing === it
+        b.previewSpin.visibility = if (pv && previewLoading) View.VISIBLE else View.GONE
+        b.previewBtn.visibility = if (pv && previewLoading) View.INVISIBLE else View.VISIBLE
+        b.previewBtn.setImageResource(if (pv) R.drawable.ic_pause else R.drawable.ic_play)
+        if (pv && !previewLoading && it.status == Status.PENDING) {
+            b.miniProgress.visibility = View.VISIBLE
+            b.miniProgress.progress = (previewFrac * 1000).toInt()
+        }
+        b.previewBtn.setOnClickListener { v -> v.haptic(); onPreview(it) }
+        b.videoBtn.visibility = if (it.platform == Platform.SPOTIFY) View.GONE else View.VISIBLE
+        b.videoBtn.setOnClickListener { v -> v.haptic(); onVideo(it) }
 
         b.root.setOnClickListener { v ->
             if (locked) return@setOnClickListener
@@ -132,8 +149,7 @@ class FooterAdapter(private val onCredit: (View) -> Unit, private val onDonate: 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
         val b = ItemFooterBinding.inflate(LayoutInflater.from(parent.context), parent, false)
         b.credit.setOnClickListener(onCredit)
-        b.donate.pressable(0.94f)
-        b.donate.setOnClickListener(onDonate)
+        b.donate.visibility = View.GONE
         return object : RecyclerView.ViewHolder(b.root) {}
     }
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {}

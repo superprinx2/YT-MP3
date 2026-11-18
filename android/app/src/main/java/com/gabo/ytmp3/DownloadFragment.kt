@@ -33,11 +33,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
-class DownloadFragment : Fragment() {
+class DownloadFragment : Fragment(), BackAware {
 
     private val ctx get() = requireActivity() as AppCompatActivity
     private var targets: Set<Long> = emptySet()
     private var targetNames: String = ""
+    private lateinit var web: WebReplica
+    private lateinit var backChip: android.widget.TextView
+    private var showingResults = false
+    private var homeLoaded = false
+    private var previewJob: kotlinx.coroutines.Job? = null
 
 
     private lateinit var b: ActivityMainBinding
@@ -68,10 +73,11 @@ class DownloadFragment : Fragment() {
 
         b.list.layoutManager = LinearLayoutManager(requireContext())
         h = HeaderMainBinding.inflate(inflater, b.list, false)
-        adapter = VideoAdapter(DownloadState.items) { updateCount() }
+        adapter = VideoAdapter(DownloadState.items, { updateCount() }, { togglePreview(it) }, { openVideo(it) })
         b.list.adapter = ConcatAdapter(HeaderAdapter(h.root), adapter,
             FooterAdapter({ SettingsActivity.copyHandle(ctx, it) }, { it.haptic(); Donate.show(ctx) }))
         b.list.itemAnimator = null
+        setupReplica()
 
         // --- interacción
         listOf(h.btnAnalyze, h.btnPaste, h.btnSettings, h.modeChip, h.rowFolder, h.rowQuality, b.btnCancel)
@@ -133,7 +139,7 @@ class DownloadFragment : Fragment() {
             h.tabFacebook to Platform.FACEBOOK, h.tabSpotify to Platform.SPOTIFY)
             .forEach { (v, p) ->
                 v.pressable(0.95f)
-                v.setOnClickListener { if (!DownloadState.running) { it.haptic(); setPlatform(p) } }
+                v.setOnClickListener { if (!DownloadState.running) { it.haptic(); showingResults = false; setPlatform(p) } }
             }
 
         setPlatform(prefs.platform, animate = false)
@@ -178,6 +184,8 @@ class DownloadFragment : Fragment() {
 
     override fun onPause() {
         h.btnDonate.removeCallbacks(donateWiggle)
+        stopPreview()
+        if (::web.isInitialized) web.pause()
         super.onPause()
     }
 
@@ -231,7 +239,7 @@ class DownloadFragment : Fragment() {
         if (animate) tabs[p]?.bounce()
         heroView?.setPalette(p.palette)
         h.urlInput.hint = when (p) {
-            Platform.YOUTUBE -> "Pega el enlace del video o playlist"
+            Platform.YOUTUBE -> "Busca canciones o pega un enlace"
             Platform.TIKTOK -> "Pega el enlace del TikTok"
             Platform.INSTAGRAM -> "Pega el enlace del reel o publicación"
             Platform.FACEBOOK -> "Pega el enlace del video o reel de Facebook"
@@ -240,7 +248,7 @@ class DownloadFragment : Fragment() {
         if (DownloadState.items.isEmpty() && !analyzing) {
             h.infoText.visibility = View.VISIBLE
             h.infoText.text = when (p) {
-                Platform.YOUTUBE -> "También puedes tocar «Compartir» en la app de YouTube y elegir DownSong."
+                Platform.YOUTUBE -> "Busca canciones y videos sin anuncios. Toca ▶ en la portada para escuchar antes de descargar."
                 Platform.TIKTOK -> "Videos sin marca de agua en MP4, o solo el audio en MP3. También funciona «Compartir» desde TikTok."
                 Platform.INSTAGRAM -> "Reels y videos de publicaciones en MP4 o MP3. También funciona «Compartir» desde Instagram. " +
                     "Si Instagram pidiera iniciar sesión, te avisaremos."
@@ -255,6 +263,183 @@ class DownloadFragment : Fragment() {
         h.segMp4.isEnabled = !sp && !DownloadState.running
         h.segMp4.alpha = if (sp) 0.35f else 1f
         showLoginCard()
+        updateMode()
+    }
+
+    // ------------------------------------------------------------------ réplicas
+    private fun setupReplica() {
+        h.hero.visibility = View.GONE
+        val column = b.list.parent as android.widget.LinearLayout
+        (h.platformBar.parent as android.view.ViewGroup).removeView(h.platformBar)
+        val top = android.widget.LinearLayout(ctx).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(ctx.dp(12), ctx.dp(10), ctx.dp(6), ctx.dp(6))
+        }
+        top.addView(h.platformBar, lp(0, ctx.dp(68), 1f))
+        top.addView(ctx.icon(R.drawable.ic_person, 46, ctx.col(R.color.ios_label), 10).apply {
+            contentDescription = "Iniciar sesión"
+            setOnClickListener { it.haptic(); login() }
+        })
+        column.addView(top, 0)
+        web = WebReplica(ctx) { _, url ->
+            h.urlInput.setText(url); showingResults = true; updateMode(); analyze()
+        }
+        web.view.visibility = View.GONE
+        column.addView(web.view, 2, lp(MATCH, 0, 1f))
+        backChip = ctx.text("", 15f, ctx.col(R.color.ios_blue), 1).apply {
+            setPadding(ctx.dp(18), ctx.dp(4), ctx.dp(18), ctx.dp(6))
+            visibility = View.GONE
+            setOnClickListener { it.haptic(); showingResults = false; updateMode() }
+        }
+        (h.root as android.view.ViewGroup).addView(backChip, 0)
+        // Panel que se esconde al bajar y vuelve solo arriba del todo, con "imán" (snap)
+        b.list.addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
+            override fun onScrollStateChanged(rv: androidx.recyclerview.widget.RecyclerView, state: Int) {
+                if (state != androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_IDLE) return
+                val lm = rv.layoutManager as LinearLayoutManager
+                if (lm.findFirstVisibleItemPosition() != 0) return
+                val v = lm.findViewByPosition(0) ?: return
+                val hidden = -v.top
+                if (hidden in 1 until v.height) rv.smoothScrollBy(0, if (hidden > v.height / 3) v.height - hidden else -hidden)
+            }
+        })
+    }
+
+    private val isWebPlatform get() = prefs.platform != Platform.YOUTUBE
+    private val webVisible get() = ::web.isInitialized && isWebPlatform && !showingResults
+
+    private fun updateMode() {
+        if (!::web.isInitialized) return
+        val showWeb = webVisible
+        b.list.visibility = if (showWeb) View.GONE else View.VISIBLE
+        web.view.visibility = if (showWeb) View.VISIBLE else View.GONE
+        if (showWeb) { stopPreview(); web.show(prefs.platform); web.resume() } else web.pause()
+        backChip.visibility = if (isWebPlatform && showingResults) View.VISIBLE else View.GONE
+        backChip.text = "‹ Volver a ${prefs.platform.label}"
+        b.bottomBar.visibility = if (showWeb && !DownloadState.running) View.GONE else View.VISIBLE
+        if (!isWebPlatform && DownloadState.items.isEmpty() && !homeLoaded && !analyzing && !DownloadState.running) loadHome()
+    }
+
+    private fun login() {
+        val p = prefs.platform
+        if (p == Platform.YOUTUBE) openVerify(p)
+        else { showingResults = false; updateMode(); web.openLogin(p) }
+    }
+
+    override fun onBack(): Boolean {
+        if (webVisible && web.back()) return true
+        if (isWebPlatform && showingResults) { showingResults = false; updateMode(); return true }
+        return false
+    }
+
+    override fun onHiddenChanged(hidden: Boolean) {
+        super.onHiddenChanged(hidden)
+        if (hidden) { stopPreview(); if (::web.isInitialized) web.pause() } else updateMode()
+    }
+
+    /** Inicio de la réplica de YouTube: lo recomendado para ti (si iniciaste sesión) o tendencias. */
+    private fun loadHome() {
+        homeLoaded = true
+        search(null, if (Cookies.has(ctx, Platform.YOUTUBE)) ":ytrec" else null)
+    }
+
+    /** Búsqueda propia en YouTube (sin anuncios): solo contenido descargable. */
+    private fun search(q: String?, feed: String? = null) {
+        if (analyzing || DownloadState.running) return
+        if (prefs.platform != Platform.YOUTUBE) {
+            if (q != null) { showingResults = false; updateMode(); web.search(prefs.platform, q) }
+            return
+        }
+        stopPreview()
+        analyzing = true
+        h.analyzeSpinner.visibility = View.VISIBLE
+        h.infoText.visibility = View.VISIBLE
+        h.infoText.text = if (q == null) "Cargando recomendaciones…" else "Buscando «$q»…"
+        render()
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                if (!App.ready.isCompleted) h.infoText.text = "Preparando el motor (solo la primera vez)…"
+                App.ready.await()
+                fun run(target: String): String {
+                    val cookies = Cookies.tempCopy(ctx.applicationContext)
+                    try {
+                        val req = YoutubeDLRequest(target).addOption("--flat-playlist").addOption("-J").addOption("--no-warnings")
+                            .addOption("-I", "1:40")
+                            .addOption("--cache-dir", App.cacheDir(ctx.applicationContext).absolutePath)
+                        if (cookies != null) req.addOption("--cookies", cookies.absolutePath)
+                        return YoutubeDL.getInstance().execute(req).out
+                    } finally { cookies?.delete() }
+                }
+                val trending = "ytsearch40:música éxitos ${java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)}"
+                var fellBack = false
+                val json = withContext(Dispatchers.IO) {
+                    when {
+                        q != null -> run("ytsearch40:$q")
+                        feed != null -> try { run(feed) } catch (e: Exception) { fellBack = true; run(trending) }
+                        else -> run(trending)
+                    }
+                }
+                var list = withContext(Dispatchers.Default) { Util.parseInfo(json, Platform.YOUTUBE).third }
+                if (list.isEmpty() && q == null) {
+                    fellBack = true
+                    val again = withContext(Dispatchers.IO) { run(trending) }
+                    list = withContext(Dispatchers.Default) { Util.parseInfo(again, Platform.YOUTUBE).third }
+                }
+                list.forEach { it.checked = false }
+                DownloadState.items.clear(); DownloadState.items.addAll(list)
+                DownloadState.listTitle = q ?: "Para ti"; DownloadState.isPlaylist = true
+                DownloadState.finishedMessage = null; DownloadState.totalCount = 0
+                h.infoText.text = when {
+                    q != null -> "Resultados para «$q» · toca ▶ para escuchar antes de descargar"
+                    feed != null && !fellBack -> "Recomendado para ti · toca ▶ para escuchar"
+                    else -> "Lo más escuchado ahora · toca ▶ para escuchar"
+                }
+                h.listTitle.text = "${list.size} videos"
+                adapter.notifyDataSetChanged()
+            } catch (e: Throwable) {
+                h.infoText.text = "No se pudo buscar: ${(e.message ?: e.toString()).lines().lastOrNull { it.isNotBlank() }?.take(200)}"
+            } finally {
+                analyzing = false
+                h.analyzeSpinner.visibility = View.GONE
+                render()
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ vista previa
+    private fun refreshRow(it: VideoItem) { val i = DownloadState.items.indexOf(it); if (i >= 0) adapter.notifyItemChanged(i) }
+
+    private fun togglePreview(it: VideoItem) {
+        if (adapter.previewing === it) { stopPreview(); return }
+        stopPreview()
+        adapter.previewing = it; adapter.previewLoading = true; refreshRow(it)
+        previewJob = viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                val u = Streams.resolve(ctx.applicationContext, it, false)
+                if (adapter.previewing !== it) return@launch
+                Preview.play(ctx, u) { b.list.post { if (adapter.previewing === it) stopPreview() } }
+                adapter.previewLoading = false; refreshRow(it)
+                while (adapter.previewing === it) {
+                    adapter.previewFrac = Preview.fraction(); refreshRow(it)
+                    kotlinx.coroutines.delay(500)
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e
+            } catch (e: Exception) { toast("No se pudo cargar la vista previa"); stopPreview() }
+        }
+    }
+
+    private fun stopPreview() {
+        if (!::adapter.isInitialized) return
+        val it = adapter.previewing
+        adapter.previewing = null; adapter.previewLoading = false; adapter.previewFrac = 0f
+        previewJob?.cancel(); previewJob = null
+        Preview.stop()
+        if (it != null) refreshRow(it)
+    }
+
+    private fun openVideo(it: VideoItem) {
+        stopPreview()
+        Preview.showVideo(ctx, it.title, { Streams.resolve(ctx.applicationContext, it, true) }, viewLifecycleOwner.lifecycleScope)
     }
 
     private fun showLoginCard() {
@@ -330,7 +515,12 @@ class DownloadFragment : Fragment() {
     // ------------------------------------------------------------------ búsqueda (video o playlist)
     private fun analyze() {
         if (analyzing || DownloadState.running) return
-        val url = Util.extractUrl(h.urlInput.text?.toString())
+        val raw = h.urlInput.text?.toString()?.trim().orEmpty()
+        val url = Util.extractUrl(raw)
+        if (url == null && raw.length >= 2) {
+            ctx.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(h.urlInput.windowToken, 0)
+            search(raw); return
+        }
         if (url == null) {
             h.urlError.text = "Pega un enlace válido (https://…)"
             h.urlError.visibility = View.VISIBLE
@@ -501,6 +691,7 @@ class DownloadFragment : Fragment() {
     private fun render() {
         val s = DownloadState
         val running = s.running
+        if (::web.isInitialized) b.bottomBar.visibility = if (webVisible && !running) View.GONE else View.VISIBLE
         h.listHeader.visibility = if (s.items.isNotEmpty()) View.VISIBLE else View.GONE
         h.btnAnalyze.isEnabled = !running && !analyzing
         h.btnPaste.isEnabled = !running && !analyzing

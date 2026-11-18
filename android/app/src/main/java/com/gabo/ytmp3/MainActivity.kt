@@ -27,6 +27,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_OPEN_PLAYER = "open_player"
+        private const val TAG_HOME = "home"
         private const val TAG_LIB = "lib"
         private const val TAG_DL = "dl"
         private const val TAG_PLAYER = "player"
@@ -41,7 +42,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var miniPlay: ImageView
     private lateinit var miniProgress: ProgressBar
     private lateinit var nav: LinearLayout
+    private lateinit var tabHome: LinearLayout
     private lateinit var tabLib: LinearLayout
+    private lateinit var tabNew: LinearLayout
     private lateinit var tabDl: LinearLayout
     private var tab = 0
     private var lastTrackId = -1L
@@ -60,6 +63,7 @@ class MainActivity : AppCompatActivity() {
         buildUi()
         if (savedInstanceState == null) {
             supportFragmentManager.beginTransaction()
+                .add(content.id, HomeFragment(), TAG_HOME)
                 .add(content.id, LibraryFragment(), TAG_LIB)
                 .add(content.id, DownloadFragment(), TAG_DL)
                 .commitNow()
@@ -75,6 +79,7 @@ class MainActivity : AppCompatActivity() {
                 val fm = supportFragmentManager
                 when {
                     fm.backStackEntryCount > 0 -> fm.popBackStack()
+                    tab == 2 && (fm.findFragmentByTag(TAG_DL) as? BackAware)?.onBack() == true -> {}
                     tab != 0 -> selectTab(0)
                     else -> { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
                 }
@@ -96,7 +101,7 @@ class MainActivity : AppCompatActivity() {
         i ?: return
         if (i.getBooleanExtra(EXTRA_OPEN_PLAYER, false)) { i.removeExtra(EXTRA_OPEN_PLAYER); openPlayer(); return }
         if (i.action == Intent.ACTION_SEND || i.getBooleanExtra(DownloadService.EXTRA_OPEN_VERIFY, false)) {
-            selectTab(1)
+            selectTab(2)
             (supportFragmentManager.findFragmentByTag(TAG_DL) as? DownloadFragment)?.handleIntent(i)
         }
     }
@@ -163,9 +168,11 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, dp(6), 0, dp(6))
         }
-        tabLib = navTab(R.drawable.ic_library, "Biblioteca") { selectTab(0) }
-        tabDl = navTab(R.drawable.ic_download_globe, "Descargar") { selectTab(1) }
-        nav.addView(tabLib, lp(0, WRAP, 1f)); nav.addView(tabDl, lp(0, WRAP, 1f))
+        tabHome = navTab(R.drawable.ic_home, "Inicio") { selectTab(0) }
+        tabLib = navTab(R.drawable.ic_library, "Biblioteca") { selectTab(1) }
+        tabDl = navTab(R.drawable.ic_download_globe, "Descargar") { selectTab(2) }
+        tabNew = navTab(R.drawable.ic_add_box, "Crear") { createPlaylist() }
+        listOf(tabHome, tabLib, tabDl, tabNew).forEach { nav.addView(it, lp(0, WRAP, 1f)) }
         bottom.addView(nav, lp(MATCH, WRAP))
         root.addView(bottom, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
 
@@ -197,7 +204,7 @@ class MainActivity : AppCompatActivity() {
             intArrayOf(Color.argb(235, Color.red(base), Color.green(base), Color.blue(base)), darker(accent, 0.45f)))
             else GradientDrawable().apply { setColor(Color.argb(245, Color.red(base), Color.green(base), Color.blue(base))) }
         if (dyn) window.decorView.setBackgroundColor(darker(accent, 0.35f))
-        listOf(tabLib, tabDl).forEachIndexed { i, t ->
+        listOf(tabHome, tabLib, tabDl, tabNew).forEachIndexed { i, t ->
             val on = i == tab
             val c = if (on) col(R.color.ios_label) else col(R.color.ios_secondary)
             (t.findViewWithTag<ImageView>("icon")).setColorFilter(c)
@@ -209,11 +216,11 @@ class MainActivity : AppCompatActivity() {
         tab = i
         val fm = supportFragmentManager
         while (fm.backStackEntryCount > 0 && fm.findFragmentByTag(TAG_PLAYER) == null) fm.popBackStackImmediate()
-        val lib = fm.findFragmentByTag(TAG_LIB); val dl = fm.findFragmentByTag(TAG_DL)
         val tr = fm.beginTransaction()
         fm.fragments.filter { it.tag?.startsWith("pl_") == true }.forEach { tr.remove(it) }
-        if (lib != null) { if (i == 0) tr.show(lib) else tr.hide(lib) }
-        if (dl != null) { if (i == 1) tr.show(dl) else tr.hide(dl) }
+        listOf(TAG_HOME, TAG_LIB, TAG_DL).forEachIndexed { idx, tag ->
+            fm.findFragmentByTag(tag)?.let { f -> if (idx == i) tr.show(f) else tr.hide(f) }
+        }
         tr.commitNowAllowingStateLoss()
         paintNav()
     }
@@ -221,7 +228,8 @@ class MainActivity : AppCompatActivity() {
     /** Abre una playlist encima de la biblioteca (atrás vuelve a la biblioteca). */
     fun openPlaylist(id: Long) {
         val fm = supportFragmentManager
-        val lib = fm.findFragmentByTag(TAG_LIB) ?: return
+        if (tab == 2) selectTab(1)
+        val lib = fm.findFragmentByTag(if (tab == 0) TAG_HOME else TAG_LIB) ?: return
         fm.beginTransaction()
             .setCustomAnimations(R.anim.slide_in_right, R.anim.fade_out_short, R.anim.fade_in_short, R.anim.slide_out_right)
             .hide(lib)
@@ -244,6 +252,13 @@ class MainActivity : AppCompatActivity() {
     fun closePlayer() {
         val fm = supportFragmentManager
         if (fm.findFragmentByTag(TAG_PLAYER) != null) fm.popBackStack("player", androidx.fragment.app.FragmentManager.POP_BACK_STACK_INCLUSIVE)
+    }
+
+    private fun createPlaylist() = PlaylistPicker.askName(this, "Nueva playlist", "") { name ->
+        lifecycleScope.launch {
+            val id = Library.createPlaylist(this@MainActivity, name)
+            selectTab(1); openPlaylist(id)
+        }
     }
 
     fun refreshLibrary() { /* la biblioteca se actualiza sola (Room Flow) */ }
@@ -283,5 +298,8 @@ class MainActivity : AppCompatActivity() {
 
 /** Fragmentos que reaccionan al color de la canción (tema dinámico). */
 interface AccentAware { fun onAccent(color: Int) }
+
+/** Fragmentos que manejan el botón atrás (p. ej. retroceder dentro de una réplica web). */
+interface BackAware { fun onBack(): Boolean }
 
 @Suppress("unused") private fun Fragment.main() = activity as? MainActivity

@@ -36,6 +36,8 @@ class PlayerFragment : Fragment() {
     private lateinit var art: FrameLayout
     private lateinit var coverImg: ImageView
     private lateinit var kaleido: KaleidoView
+    private lateinit var bgKaleido: KaleidoView
+    private lateinit var scrim: View
     private lateinit var video: PlayerView
     private lateinit var fromText: TextView
     private lateinit var title: TextView
@@ -56,6 +58,15 @@ class PlayerFragment : Fragment() {
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, s: Bundle?): View {
         val c = requireContext()
         root = FrameLayout(c).apply { isClickable = true; setBackgroundColor(Color.BLACK) }
+        // Caleidoscopio a pantalla completa (canciones sin portada)
+        bgKaleido = KaleidoView(c).apply { visibility = View.GONE }
+        root.addView(bgKaleido, FrameLayout.LayoutParams(MATCH, MATCH))
+        scrim = View(c).apply {
+            visibility = View.GONE
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(0x66000000, 0x00000000, 0x00000000, 0xCC000000.toInt()))
+        }
+        root.addView(scrim, FrameLayout.LayoutParams(MATCH, MATCH))
         val col = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL; setPadding(c.dp(20), 0, c.dp(20), 0) }
         root.addView(col, FrameLayout.LayoutParams(MATCH, MATCH))
 
@@ -186,6 +197,7 @@ class PlayerFragment : Fragment() {
         PlaybackService.removeListener(listener)
         root.removeCallbacks(tick)
         kaleido.running = false
+        bgKaleido.running = false
         video.player = null
         super.onStop()
     }
@@ -257,9 +269,12 @@ class PlayerFragment : Fragment() {
         video.visibility = if (showVideo) View.VISIBLE else View.GONE
         if (showVideo) { if (video.player !== s.active) video.player = s.active } else video.player = null
         val useK = Covers.usesKaleido(c, t) && Prefs2(c).kaleidoNoCover
-        kaleido.visibility = if (useK && !showVideo) View.VISIBLE else View.GONE
-        kaleido.seed = t.id
-        kaleido.running = useK && !showVideo && s.active.isPlaying
+        val full = useK && !showVideo
+        kaleido.visibility = View.GONE
+        bgKaleido.visibility = if (full) View.VISIBLE else View.GONE
+        scrim.visibility = bgKaleido.visibility
+        bgKaleido.seed = t.id
+        bgKaleido.running = full && s.active.isPlaying
         coverImg.visibility = if (!useK && !showVideo) View.VISIBLE else View.GONE
 
         if (t.id != lastId) {
