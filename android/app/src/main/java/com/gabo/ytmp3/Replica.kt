@@ -218,6 +218,7 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
             override fun onPageFinished(view: WebView, url: String?) { bar.visibility = View.GONE; check(url) }
             override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) { check(url) }
         }
+        w.setOnScrollChangeListener { _, _, y, _, oy -> onScroll?.invoke(y, oy) }
         w.webChromeClient = object : android.webkit.WebChromeClient() {
             override fun onProgressChanged(view: WebView, p: Int) { bar.progress = p }
         }
@@ -244,6 +245,9 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
         pill.visibility = View.GONE
         w.loadUrl(lastUrl[p] ?: home(p))
     }
+
+    var onScroll: ((Int, Int) -> Unit)? = null
+    fun hideField() { field.visibility = View.GONE }
 
     fun search(p: Platform, q: String) {
         val e = Uri.encode(q)

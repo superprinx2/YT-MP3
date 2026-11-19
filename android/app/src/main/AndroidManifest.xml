@@ -12,6 +12,7 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 
     <queries>
@@ -47,6 +48,21 @@
         <activity
             android:name=".OnboardingActivity"
             android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".LockActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:showWhenLocked="true"
+            android:taskAffinity="com.gabo.ytmp3.lock"
+            android:theme="@style/Theme.DownSong.Lock" />
+
+        <activity
+            android:name=".ImportActivity"
+            android:exported="false"
+            android:theme="@style/Theme.DownSong.Lock"
             android:windowSoftInputMode="adjustResize" />
 
         <activity

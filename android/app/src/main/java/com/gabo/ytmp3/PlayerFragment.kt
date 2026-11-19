@@ -37,6 +37,7 @@ class PlayerFragment : Fragment() {
     private lateinit var coverImg: ImageView
     private lateinit var kaleido: KaleidoView
     private lateinit var bgKaleido: KaleidoView
+    private var viz: VizView? = null
     private lateinit var scrim: View
     private lateinit var video: PlayerView
     private lateinit var fromText: TextView
@@ -61,6 +62,7 @@ class PlayerFragment : Fragment() {
         // Caleidoscopio a pantalla completa (canciones sin portada)
         bgKaleido = KaleidoView(c).apply { visibility = View.GONE }
         root.addView(bgKaleido, FrameLayout.LayoutParams(MATCH, MATCH))
+        if (!Prefs2(c).saver) { viz = VizView(c).apply { visibility = View.GONE }; root.addView(viz, FrameLayout.LayoutParams(MATCH, MATCH)) }
         scrim = View(c).apply {
             visibility = View.GONE
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
@@ -198,6 +200,7 @@ class PlayerFragment : Fragment() {
         root.removeCallbacks(tick)
         kaleido.running = false
         bgKaleido.running = false
+        viz?.stop(); viz?.visibility = View.GONE
         video.player = null
         super.onStop()
     }
@@ -271,10 +274,18 @@ class PlayerFragment : Fragment() {
         val useK = Covers.usesKaleido(c, t) && Prefs2(c).kaleidoNoCover
         val full = useK && !showVideo
         kaleido.visibility = View.GONE
-        bgKaleido.visibility = if (full) View.VISIBLE else View.GONE
-        scrim.visibility = bgKaleido.visibility
-        bgKaleido.seed = t.id
-        bgKaleido.running = full && s.active.isPlaying
+        val v = viz
+        if (v != null) {
+            bgKaleido.visibility = View.GONE
+            if (full && v.visibility != View.VISIBLE) { v.visibility = View.VISIBLE; v.start() }
+            if (!full && v.visibility == View.VISIBLE) { v.stop(); v.visibility = View.GONE }
+            scrim.visibility = v.visibility
+        } else {
+            bgKaleido.visibility = if (full) View.VISIBLE else View.GONE
+            scrim.visibility = bgKaleido.visibility
+            bgKaleido.seed = t.id
+            bgKaleido.running = full && s.active.isPlaying
+        }
         coverImg.visibility = if (!useK && !showVideo) View.VISIBLE else View.GONE
 
         if (t.id != lastId) {

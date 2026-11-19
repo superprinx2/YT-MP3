@@ -247,7 +247,7 @@ class DownloadService : Service() {
             Log.e(TAG, "queue failed", e)
             fatal = e.message ?: e.toString()
         } finally {
-            Loudness.kick(this)
+            Analyzer.kick(this)
             val wall = (SystemClock.elapsedRealtime() - started) / 1000
             withContext(Dispatchers.Main) { finish(ok.get(), failed.get(), jobs.size, fatal, wall) }
         }

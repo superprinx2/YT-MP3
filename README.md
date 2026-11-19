@@ -27,6 +27,9 @@ Todas las versiones están en [Releases](https://github.com/superprinx2/YT-MP3/r
 - **Reproductor** al estilo Spotify: fondo con el color de la portada, aleatorio, repetir, deslizar para cambiar de canción, video opcional.
 - **Segundo plano y pantalla de bloqueo** con anterior, pausa, siguiente, aleatorio y repetir.
 - **Crossfade** (1 a 12 s), **nivelar volumen**, temas claro, oscuro, sistema y dinámico.
+- **Modo DJ**: elige canciones de ritmo parecido, empieza por el coro y mezcla con efectos; también por estado de ánimo (12 modos) y aprende de ti.
+- **Visualizador** hipnótico (OpenGL) y **pantalla de bloqueo propia** con la portada.
+- **Ecualizador** con perfiles, **estadísticas** del mes y modos de uso (Máximo, Equilibrado, Ahorro).
 - **Caleidoscopio** animado al ritmo de la música para las canciones sin portada.
 - **Música del celular**: agrégala a tus playlists sin copiarla.
 - **Cinco plataformas** con pestañas: **YouTube**, **TikTok**, **Instagram**, **Facebook** y **Spotify**. Al pegar un enlace la app cambia sola de pestaña.

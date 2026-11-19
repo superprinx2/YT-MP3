@@ -40,7 +40,7 @@ class App : Application() {
         instance = this
         Prefs2.applyTheme(this)
         createChannels()
-        Loudness.kick(this)
+        Analyzer.kick(this)
         scope.launch {
             try {
                 Updater.prepareBundled(this@App)

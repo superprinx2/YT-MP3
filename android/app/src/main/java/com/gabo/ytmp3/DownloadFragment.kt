@@ -267,42 +267,136 @@ class DownloadFragment : Fragment(), BackAware {
     }
 
     // ------------------------------------------------------------------ réplicas
+    private lateinit var panelBox: android.widget.FrameLayout
+    private lateinit var pill: View
+    private lateinit var spacer: View
+    private var panelH = 0
+    private var off = 0f
+
     private fun setupReplica() {
         h.hero.visibility = View.GONE
         val column = b.list.parent as android.widget.LinearLayout
         (h.platformBar.parent as android.view.ViewGroup).removeView(h.platformBar)
         val top = android.widget.LinearLayout(ctx).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(ctx.dp(12), ctx.dp(10), ctx.dp(6), ctx.dp(6))
+            setPadding(ctx.dp(12), ctx.dp(6), ctx.dp(6), ctx.dp(4))
         }
-        top.addView(h.platformBar, lp(0, ctx.dp(68), 1f))
+        top.addView(h.platformBar, lp(0, ctx.dp(64), 1f))
         top.addView(ctx.icon(R.drawable.ic_person, 46, ctx.col(R.color.ios_label), 10).apply {
             contentDescription = "Iniciar sesión"
             setOnClickListener { it.haptic(); login() }
         })
         column.addView(top, 0)
+
+        // Escenario: la lista o la web ocupan todo; el recuadro (buscador, formato, calidad) flota encima
+        val stage = android.widget.FrameLayout(ctx)
+        val listIdx = column.indexOfChild(b.list)
+        column.removeView(b.list)
+        column.addView(stage, listIdx, lp(MATCH, 0, 1f))
+        stage.addView(b.list, android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
         web = WebReplica(ctx) { _, url ->
             h.urlInput.setText(url); showingResults = true; updateMode(); analyze()
         }
+        web.hideField()
         web.view.visibility = View.GONE
-        column.addView(web.view, 2, lp(MATCH, 0, 1f))
+        stage.addView(web.view, android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
+        web.onScroll = { y, oy -> if (y <= 0) setOff(0f) else setOff(off + (y - oy)) }
+
+        // El recuadro sale de la lista y pasa a flotar
+        (h.root.parent as? android.view.ViewGroup)?.removeView(h.root)
+        panelBox = android.widget.FrameLayout(ctx).apply {
+            setBackgroundColor(ctx.col(R.color.ios_bg)); elevation = ctx.dp(2).toFloat()
+            addView(h.root, android.widget.FrameLayout.LayoutParams(MATCH, WRAP))
+        }
+        stage.addView(panelBox, android.widget.FrameLayout.LayoutParams(MATCH, WRAP, android.view.Gravity.TOP))
+        compactPanel()
         backChip = ctx.text("", 15f, ctx.col(R.color.ios_blue), 1).apply {
             setPadding(ctx.dp(18), ctx.dp(4), ctx.dp(18), ctx.dp(6))
             visibility = View.GONE
             setOnClickListener { it.haptic(); showingResults = false; updateMode() }
         }
         (h.root as android.view.ViewGroup).addView(backChip, 0)
-        // Panel que se esconde al bajar y vuelve solo arriba del todo, con "imán" (snap)
+
+        // Barrita de 2 cm: el recuadro escondido vuelve al tocarla o deslizarla hacia abajo
+        pill = android.widget.FrameLayout(ctx).apply {
+            visibility = View.GONE
+            addView(View(ctx).apply { background = roundRect(0x99FFFFFF.toInt(), ctx.dp(3).toFloat()) },
+                android.widget.FrameLayout.LayoutParams(ctx.dp(64), ctx.dp(5), android.view.Gravity.CENTER))
+            var downY = 0f
+            setOnTouchListener { pv, e ->
+                when (e.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> downY = e.rawY
+                    android.view.MotionEvent.ACTION_UP -> if (e.rawY - downY > ctx.dp(10) || kotlin.math.abs(e.rawY - downY) < ctx.dp(8)) { pv.haptic(); animateOff(0f) }
+                }
+                true
+            }
+        }
+        stage.addView(pill, android.widget.FrameLayout.LayoutParams(ctx.dp(160), ctx.dp(26), android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL))
+
+        // En la lista, un espacio arriba del alto del recuadro
+        spacer = View(ctx)
+        b.list.adapter = ConcatAdapter(HeaderAdapter(spacer), adapter,
+            FooterAdapter({ SettingsActivity.copyHandle(ctx, it) }))
+        panelBox.addOnLayoutChangeListener { _, _, t, _, bt, _, _, _, _ ->
+            val hgt = bt - t
+            if (hgt != panelH) {
+                panelH = hgt
+                spacer.minimumHeight = hgt
+                spacer.requestLayout()
+                (web.view.layoutParams as android.widget.FrameLayout.LayoutParams).bottomMargin = -hgt
+                web.view.requestLayout()
+                setOff(off)
+            }
+        }
         b.list.addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
+            override fun onScrolled(rv: androidx.recyclerview.widget.RecyclerView, dx: Int, dy: Int) {
+                if (!rv.canScrollVertically(-1)) setOff(0f) else setOff(off + dy)
+            }
             override fun onScrollStateChanged(rv: androidx.recyclerview.widget.RecyclerView, state: Int) {
-                if (state != androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_IDLE) return
-                val lm = rv.layoutManager as LinearLayoutManager
-                if (lm.findFirstVisibleItemPosition() != 0) return
-                val v = lm.findViewByPosition(0) ?: return
-                val hidden = -v.top
-                if (hidden in 1 until v.height) rv.smoothScrollBy(0, if (hidden > v.height / 3) v.height - hidden else -hidden)
+                if (state == androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_IDLE && off > 0 && off < panelH)
+                    animateOff(if (off > panelH / 3f) panelH.toFloat() else 0f)
             }
         })
+        // la barra de descarga deja libre la zona de los botones del sistema
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(b.bottomBar) { v, ins ->
+            val nb = ins.getInsets(androidx.core.view.WindowInsetsCompat.Type.navigationBars()).bottom
+            v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, ctx.dp(12) + nb); ins
+        }
+    }
+
+    private fun setOff(v: Float) {
+        if (!::panelBox.isInitialized) return
+        off = v.coerceIn(0f, panelH.toFloat())
+        panelBox.translationY = -off
+        web.view.translationY = panelH - off
+        pill.visibility = if (panelH > 0 && off >= panelH - 1) View.VISIBLE else View.GONE
+    }
+
+    private fun animateOff(to: Float) {
+        android.animation.ValueAnimator.ofFloat(off, to).apply {
+            duration = 220; addUpdateListener { setOff(it.animatedValue as Float) }; start()
+        }
+    }
+
+    /** Recuadro compacto: solo lo necesario para buscar y elegir formato. */
+    private fun compactPanel() {
+        h.btnAnalyze.visibility = View.GONE
+        fun walk(v: View) {
+            if (v is android.widget.TextView && v.text.toString().trim().lowercase() in setOf("formato", "opciones", "calidad", "guardar en")) v.visibility = View.GONE
+            if (v is android.view.ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i))
+        }
+        walk(h.root)
+        (h.rowQuality.parent as? android.widget.LinearLayout)?.let { row ->
+            row.orientation = android.widget.LinearLayout.HORIZONTAL
+            row.gravity = android.view.Gravity.CENTER_VERTICAL
+            h.rowQuality.minimumHeight = ctx.dp(48); h.rowFolder.minimumHeight = ctx.dp(48)
+            for (i in 0 until row.childCount) {
+                val c = row.getChildAt(i)
+                if (c === h.rowQuality || c === h.rowFolder) c.layoutParams = android.widget.LinearLayout.LayoutParams(0, WRAP, 1f)
+                else c.visibility = View.GONE
+            }
+        }
+        h.urlInput.imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_GO
     }
 
     private val isWebPlatform get() = prefs.platform != Platform.YOUTUBE
@@ -316,7 +410,8 @@ class DownloadFragment : Fragment(), BackAware {
         if (showWeb) { stopPreview(); web.show(prefs.platform); web.resume() } else web.pause()
         backChip.visibility = if (isWebPlatform && showingResults) View.VISIBLE else View.GONE
         backChip.text = "‹ Volver a ${prefs.platform.label}"
-        b.bottomBar.visibility = if (showWeb && !DownloadState.running) View.GONE else View.VISIBLE
+        refreshBottomBar()
+        setOff(0f)
         if (!isWebPlatform && DownloadState.items.isEmpty() && !homeLoaded && !analyzing && !DownloadState.running) loadHome()
     }
 
@@ -671,6 +766,18 @@ class DownloadFragment : Fragment(), BackAware {
     private fun selectedCount(): Int =
         if (DownloadState.items.size == 1) 1 else DownloadState.items.count { it.checked }
 
+    /** El botón Descargar solo aparece cuando hay algo marcado (o una descarga en curso). */
+    private fun refreshBottomBar() {
+        if (!::web.isInitialized) return
+        val s = DownloadState
+        val show = s.running || s.finishedMessage != null || (!webVisible && selectedCount() > 0)
+        val target = if (show) View.VISIBLE else View.GONE
+        if (b.bottomBar.visibility != target) {
+            b.bottomBar.visibility = target
+            if (show) { b.bottomBar.translationY = b.bottomBar.height.toFloat(); b.bottomBar.animate().translationY(0f).setDuration(220).start() }
+        }
+    }
+
     private fun updateCount() {
         val sel = selectedCount()
         val total = DownloadState.items.size
@@ -686,12 +793,13 @@ class DownloadFragment : Fragment(), BackAware {
             sel > 1 -> "⬇  Descargar $sel en $ext"
             else -> "⬇  Descargar $ext"
         }
+        refreshBottomBar()
     }
 
     private fun render() {
         val s = DownloadState
         val running = s.running
-        if (::web.isInitialized) b.bottomBar.visibility = if (webVisible && !running) View.GONE else View.VISIBLE
+        refreshBottomBar()
         h.listHeader.visibility = if (s.items.isNotEmpty()) View.VISIBLE else View.GONE
         h.btnAnalyze.isEnabled = !running && !analyzing
         h.btnPaste.isEnabled = !running && !analyzing

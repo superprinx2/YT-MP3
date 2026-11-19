@@ -45,12 +45,31 @@ data class Track(
     val videoBytes: Long = 0,
     @ColumnInfo(defaultValue = "0") val playCount: Int = 0,
     @ColumnInfo(defaultValue = "0") val lastPlayed: Long = 0,
+    // Análisis (DJ, saltar silencios, estados de ánimo)
+    @ColumnInfo(defaultValue = "0") val analyzed: Int = 0,
+    val bpm: Float? = null,
+    val climaxMs: Long? = null,
+    val introMs: Long? = null,
+    val outroMs: Long? = null,
+    val energy: Float? = null,
+    val bright: Float? = null,
+    val tags: String? = null,
+    val env: String? = null,
+    val gaps: String? = null,
 ) {
     val isLocal get() = localUri != null
     val hasVideo get() = videoPath != null && File(videoPath).exists()
     fun audioUri(): Uri = localUri?.let(Uri::parse) ?: Uri.fromFile(File(audioPath ?: videoPath ?: ""))
     fun videoUri(): Uri? = videoPath?.let { Uri.fromFile(File(it)) }
 }
+
+@Entity(tableName = "plays", indices = [Index("at")])
+data class Play(@PrimaryKey(autoGenerate = true) val id: Long = 0, val trackId: Long, val at: Long)
+
+@Entity(tableName = "mood_scores", primaryKeys = ["trackId", "mood"])
+data class MoodScore(val trackId: Long, val mood: String, val score: Float)
+
+data class TopRow(val trackId: Long, val n: Int)
 
 @Entity(tableName = "playlists")
 data class Playlist(
@@ -111,6 +130,15 @@ interface LibDao {
     @Query("SELECT * FROM tracks WHERE localUri IS NOT NULL ORDER BY title COLLATE NOCASE") fun localTracks(): Flow<List<Track>>
     @Query("SELECT * FROM tracks WHERE lastPlayed > 0 ORDER BY lastPlayed DESC LIMIT 20") fun recentTracks(): Flow<List<Track>>
     @Query("UPDATE tracks SET playCount = playCount + 1, lastPlayed = :now WHERE id = :id") suspend fun bump(id: Long, now: Long)
+    @Insert suspend fun insertPlay(p: Play)
+    @Query("SELECT trackId, COUNT(*) AS n FROM plays WHERE at >= :since GROUP BY trackId ORDER BY n DESC LIMIT :limit") suspend fun topSince(since: Long, limit: Int): List<TopRow>
+    @Query("SELECT COALESCE(SUM(t.durationMs), 0) FROM plays p JOIN tracks t ON t.id = p.trackId WHERE p.at >= :since") suspend fun msSince(since: Long): Long
+    @Query("SELECT COUNT(*) FROM plays WHERE at >= :since") fun playsSince(since: Long): Flow<Int>
+    @Query("SELECT * FROM tracks WHERE analyzed = 0 ORDER BY lastPlayed DESC, addedAt DESC LIMIT 10") suspend fun needAnalysis(): List<Track>
+    @Query("SELECT COUNT(*) FROM tracks WHERE analyzed = 0") suspend fun pendingAnalysis(): Int
+    @Query("SELECT * FROM mood_scores WHERE trackId IN (:ids)") suspend fun moodScores(ids: List<Long>): List<MoodScore>
+    @Query("SELECT * FROM mood_scores WHERE trackId = :tid AND mood = :mood") suspend fun moodScore(tid: Long, mood: String): MoodScore?
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putMoodScore(m: MoodScore)
     @Query("SELECT * FROM tracks WHERE id IN (:ids)") suspend fun tracksByIds(ids: List<Long>): List<Track>
 
     @Query("SELECT COALESCE(MAX(position), -1) FROM playlist_tracks WHERE playlistId = :pid") suspend fun maxPos(pid: Long): Int
@@ -126,7 +154,7 @@ interface LibDao {
     @Query("SELECT COALESCE(SUM(videoBytes), 0) FROM tracks") suspend fun totalVideo(): Long
 }
 
-@Database(entities = [Track::class, Playlist::class, PlaylistTrack::class], version = 2, exportSchema = false)
+@Database(entities = [Track::class, Playlist::class, PlaylistTrack::class, Play::class, MoodScore::class], version = 3, exportSchema = false)
 abstract class LibDb : RoomDatabase() {
     abstract fun dao(): LibDao
 }
@@ -138,11 +166,23 @@ private val M1_2 = object : androidx.room.migration.Migration(1, 2) {
     }
 }
 
+private val M2_3 = object : androidx.room.migration.Migration(2, 3) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE tracks ADD COLUMN analyzed INTEGER NOT NULL DEFAULT 0")
+        for (c in listOf("bpm REAL", "climaxMs INTEGER", "introMs INTEGER", "outroMs INTEGER", "energy REAL",
+                "bright REAL", "tags TEXT", "env TEXT", "gaps TEXT"))
+            db.execSQL("ALTER TABLE tracks ADD COLUMN $c")
+        db.execSQL("CREATE TABLE IF NOT EXISTS plays (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, trackId INTEGER NOT NULL, at INTEGER NOT NULL)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_plays_at ON plays (at)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS mood_scores (trackId INTEGER NOT NULL, mood TEXT NOT NULL, score REAL NOT NULL, PRIMARY KEY(trackId, mood))")
+    }
+}
+
 object Library {
     @Volatile private var db: LibDb? = null
 
     fun dao(ctx: Context): LibDao = (db ?: synchronized(this) {
-        db ?: Room.databaseBuilder(ctx.applicationContext, LibDb::class.java, "library.db").addMigrations(M1_2).build().also { db = it }
+        db ?: Room.databaseBuilder(ctx.applicationContext, LibDb::class.java, "library.db").addMigrations(M1_2, M2_3).build().also { db = it }
     }).dao()
 
     fun dir(ctx: Context, sub: String) = File(ctx.filesDir, "library/$sub").apply { mkdirs() }
@@ -243,7 +283,7 @@ object Library {
             ids += upsert(ctx, Track(key = "local:${s.id}", title = s.title, artist = s.artist, durationMs = s.durationMs,
                 localUri = s.uri.toString(), coverPath = cover.takeIf { it.exists() }?.absolutePath))
         }
-        Loudness.kick(ctx)
+        Analyzer.kick(ctx)
         return ids
     }
 }

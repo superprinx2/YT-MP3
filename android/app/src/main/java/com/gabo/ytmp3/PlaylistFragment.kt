@@ -58,6 +58,8 @@ class PlaylistFragment : Fragment(), AccentAware {
         list.setBackgroundColor(c.col(R.color.ios_bg))
         adapter = Adapter()
         list.adapter = adapter
+        list.clipToPadding = false
+        (activity as? MainActivity)?.onBottomInset { b -> list.setPadding(0, 0, 0, b) }
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 val dao = Library.dao(c)
@@ -120,11 +122,12 @@ class PlaylistFragment : Fragment(), AccentAware {
     }
 
     private fun songMenu(t: Track) {
-        val opts = mutableListOf("Cambiar nombre", "Cambiar portada", "Agregar a otra playlist")
+        val opts = mutableListOf("🎧 Modo DJ desde esta canción", "Cambiar nombre", "Cambiar portada", "Agregar a otra playlist")
         if (!isAll) opts += "Quitar de esta playlist"
         opts += "Eliminar de la biblioteca"
         ActionSheet.show(act, t.title, opts, destructive = setOf(opts.size - 1)) { i ->
             when (opts[i]) {
+                "🎧 Modo DJ desde esta canción" -> (activity as? MainActivity)?.openDj(null, tracks, t, "DJ · ${playlist?.name ?: ""}", pid)
                 "Cambiar nombre" -> PlaylistPicker.askName(act, "Nombre de la canción", t.title, 120) { n -> updateTrack(t.copy(title = n)) }
                 "Cambiar portada" -> { coverTarget = t; pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
                 "Agregar a otra playlist" -> PlaylistPicker.show(act, "Agregar a playlist", emptySet(), null, "Agregar") { ids, _ ->
@@ -250,6 +253,15 @@ class PlaylistFragment : Fragment(), AccentAware {
             }
         })
         actions.addView(View(c), lp(0, 1, 1f))
+        // Disco DJ: empieza el Modo DJ con esta playlist (desde la canción que suena, si es de aquí)
+        if (tracks.size >= 2) actions.addView(VinylView(c, BRAND_RED).apply {
+            contentDescription = "Modo DJ"
+            setOnClickListener {
+                it.haptic(true); kick()
+                val cur = PlayerHub.service?.current()?.takeIf { s -> isThisPlaying() && tracks.any { x -> x.id == s.id } }
+                (activity as? MainActivity)?.openDj(null, tracks, cur, "DJ · ${p.name}", p.id)
+            }
+        }, lp(c.dp(40), c.dp(40)).apply { marginEnd = c.dp(6) })
         val shuffleOn = Prefs2(c).shuffle
         actions.addView(c.icon(R.drawable.ic_shuffle, 44, if (shuffleOn) BRAND_RED else Color.WHITE, 9).apply {
             setOnClickListener {

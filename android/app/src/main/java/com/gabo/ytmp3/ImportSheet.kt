@@ -23,11 +23,11 @@ object ImportSheet {
     fun granted(c: Context) = ContextCompat.checkSelfPermission(c, permission) == PackageManager.PERMISSION_GRANTED
 
     fun start(a: AppCompatActivity, playlistId: Long?) {
-        if (granted(a)) { pickFolder(a, playlistId); return }
+        if (granted(a)) { a.startActivity(ImportActivity.intent(a, playlistId)); return }
         var launcher: androidx.activity.result.ActivityResultLauncher<String>? = null
         launcher = a.activityResultRegistry.register("import_perm_${System.nanoTime()}", ActivityResultContracts.RequestPermission()) { ok ->
             launcher?.unregister()
-            if (ok) pickFolder(a, playlistId)
+            if (ok) a.startActivity(ImportActivity.intent(a, playlistId))
             else Toast.makeText(a, "Sin permiso no podemos ver la música del celular", Toast.LENGTH_LONG).show()
         }
         launcher.launch(permission)

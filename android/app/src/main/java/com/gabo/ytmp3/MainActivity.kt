@@ -52,6 +52,15 @@ class MainActivity : AppCompatActivity() {
         private set
 
     private val playerListener: () -> Unit = { renderMini() }
+    private lateinit var bottom: View
+    private lateinit var handle: View
+    private val bottomListeners = mutableListOf<(Int) -> Unit>()
+    private var bottomH = 0
+    private var statusTop = 0
+
+    /** Las listas se dibujan por debajo de la barra de cristal: les avisamos cuánto espacio dejar abajo. */
+    fun onBottomInset(l: (Int) -> Unit) { bottomListeners += l; l(bottomH) }
+    private fun publishBottom(h: Int) { if (h != bottomH) { bottomH = h; bottomListeners.toList().forEach { it(h) } } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         setTheme(R.style.Theme_YTMP3)
@@ -127,11 +136,27 @@ class MainActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------ interfaz
     private fun buildUi() {
+        // Pantalla completa: la app se dibuja detrás de la hora/batería y de los botones del sistema
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = Color.TRANSPARENT; window.navigationBarColor = Color.TRANSPARENT
+        if (android.os.Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
         val root = FrameLayout(this).apply { setBackgroundColor(col(R.color.ios_bg)) }
         content = FrameLayout(this).apply { id = View.generateViewId() }
         root.addView(content, FrameLayout.LayoutParams(MATCH, MATCH))
 
-        val bottom = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val saver = Prefs2(this).saver
+        val glass = eightbitlab.com.blurview.BlurView(this)
+        val bottomBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        glass.addView(bottomBox, FrameLayout.LayoutParams(MATCH, WRAP))
+        if (!saver) runCatching {
+            val algo = if (android.os.Build.VERSION.SDK_INT >= 31) eightbitlab.com.blurview.RenderEffectBlur()
+                       else @Suppress("DEPRECATION") eightbitlab.com.blurview.RenderScriptBlur(this)
+            glass.setupWith(root, algo).setBlurRadius(22f).setFrameClearDrawable(window.decorView.background)
+        }
+        val base = col(R.color.ios_bg)
+        glass.setBackgroundColor(Color.argb(if (saver) 245 else 150, Color.red(base), Color.green(base), Color.blue(base)))
+        val bottom = bottomBox
+        this.bottom = glass
         // mini-reproductor
         mini = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -160,7 +185,7 @@ class MainActivity : AppCompatActivity() {
             progressBackgroundTintList = android.content.res.ColorStateList.valueOf(0x33FFFFFF)
         }
         mini.addView(miniProgress, lp(MATCH, dp(2)))
-        mini.setOnClickListener { openPlayer() }
+        miniGestures()
         bottom.addView(mini, lp(MATCH, WRAP).apply { setMargins(dp(8), 0, dp(8), dp(4)) })
 
         // barra de pestañas
@@ -174,7 +199,22 @@ class MainActivity : AppCompatActivity() {
         tabNew = navTab(R.drawable.ic_add_box, "Crear") { createPlaylist() }
         listOf(tabHome, tabLib, tabDl, tabNew).forEach { nav.addView(it, lp(0, WRAP, 1f)) }
         bottom.addView(nav, lp(MATCH, WRAP))
-        root.addView(bottom, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
+        root.addView(glass, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
+        // barrita para mostrar los botones en las réplicas (pantalla completa)
+        handle = FrameLayout(this).apply {
+            visibility = View.GONE
+            addView(View(context).apply { background = roundRect(0x99FFFFFF.toInt(), dp(3).toFloat()) },
+                FrameLayout.LayoutParams(dp(64), dp(5), Gravity.CENTER))
+            var downY = 0f
+            setOnTouchListener { _, e ->
+                when (e.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> downY = e.rawY
+                    android.view.MotionEvent.ACTION_UP -> if (downY - e.rawY > dp(12) || kotlin.math.abs(downY - e.rawY) < dp(8)) revealNav()
+                }
+                true
+            }
+        }
+        root.addView(handle, FrameLayout.LayoutParams(dp(160), dp(30), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
 
         overlay = FrameLayout(this).apply { id = View.generateViewId() }
         root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -183,11 +223,14 @@ class MainActivity : AppCompatActivity() {
 
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            statusTop = bars.top
             nav.setPadding(0, dp(6), 0, dp(6) + bars.bottom)
-            bottom.post { content.setPadding(0, 0, 0, bottom.height) }
+            content.setPadding(0, bars.top, 0, 0)
+            (handle.layoutParams as FrameLayout.LayoutParams).bottomMargin = bars.bottom
+            handle.requestLayout()
             insets
         }
-        bottom.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> content.setPadding(0, 0, 0, bottom.height) }
+        glass.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> if (tab != 2) publishBottom(glass.height) }
     }
 
     private fun navTab(iconRes: Int, label: String, onClick: () -> Unit) = LinearLayout(this).apply {
@@ -214,6 +257,7 @@ class MainActivity : AppCompatActivity() {
 
     fun selectTab(i: Int) {
         tab = i
+        applyImmersive()
         val fm = supportFragmentManager
         while (fm.backStackEntryCount > 0 && fm.findFragmentByTag(TAG_PLAYER) == null) fm.popBackStackImmediate()
         val tr = fm.beginTransaction()
@@ -238,7 +282,97 @@ class MainActivity : AppCompatActivity() {
             .commit()
     }
 
+    // ------------------------------------------------------------------ réplicas a pantalla completa
+    private val hideNav = Runnable { if (tab == 2) bottom.animate().translationY(bottom.height.toFloat() + dp(20)).setDuration(260).start(); if (tab == 2) handle.visibility = View.VISIBLE }
+
+    private fun applyImmersive() {
+        if (!::bottom.isInitialized) return
+        bottom.removeCallbacks(hideNav)
+        if (tab == 2) {
+            mini.visibility = View.GONE
+            bottom.post { bottom.animate().translationY(bottom.height.toFloat() + dp(20)).setDuration(220).start() }
+            handle.visibility = View.VISIBLE
+            publishBottom(0)
+        } else {
+            bottom.animate().translationY(0f).setDuration(220).start()
+            handle.visibility = View.GONE
+            renderMini()
+            bottom.post { publishBottom(bottom.height) }
+        }
+    }
+
+    private fun revealNav() {
+        handle.haptic()
+        handle.visibility = View.GONE
+        bottom.animate().translationY(0f).setDuration(220).start()
+        bottom.removeCallbacks(hideNav)
+        bottom.postDelayed(hideNav, 4500)
+    }
+
+    private fun miniGestures() {
+        val gd = android.view.GestureDetector(this, object : android.view.GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: android.view.MotionEvent) = true
+            override fun onSingleTapUp(e: android.view.MotionEvent): Boolean { openPlayer(); return true }
+            override fun onFling(e1: android.view.MotionEvent?, e2: android.view.MotionEvent, vx: Float, vy: Float): Boolean {
+                val dx = e2.x - (e1?.x ?: e2.x)
+                if (kotlin.math.abs(dx) < dp(40) || kotlin.math.abs(vx) < kotlin.math.abs(vy)) return false
+                val s = PlayerHub.service ?: return false
+                mini.haptic()
+                val w = mini.width.toFloat()
+                mini.animate().translationX(if (dx < 0) -w * 0.4f else w * 0.4f).alpha(0.2f).setDuration(140).withEndAction {
+                    if (dx < 0) s.next() else s.prev()
+                    mini.translationX = if (dx < 0) w * 0.4f else -w * 0.4f
+                    mini.animate().translationX(0f).alpha(1f).setDuration(200).start()
+                }.start()
+                return true
+            }
+        })
+        mini.setOnTouchListener { _, e -> gd.onTouchEvent(e) }
+    }
+
+    // ------------------------------------------------------------------ Modo DJ
+    fun openDj(mood: Mood?, tracks: List<Track>?, start: Track?, name: String, plId: Long = -4) {
+        DjFragment.pendingTracks = tracks; DjFragment.pendingStart = start
+        val fm = supportFragmentManager
+        fm.findFragmentByTag("dj")?.let { fm.popBackStackImmediate("dj", androidx.fragment.app.FragmentManager.POP_BACK_STACK_INCLUSIVE) }
+        fm.beginTransaction()
+            .setCustomAnimations(R.anim.slide_up, R.anim.fade_out_short, R.anim.fade_in_short, R.anim.slide_down)
+            .add(overlay.id, DjFragment.new(mood, name, plId), "dj")
+            .addToBackStack("dj").commit()
+    }
+
+    fun openMoods() {
+        supportFragmentManager.beginTransaction()
+            .setCustomAnimations(R.anim.fade_in_short, R.anim.fade_out_short, R.anim.fade_in_short, R.anim.fade_out_short)
+            .add(overlay.id, MoodFragment(), "moods").addToBackStack("moods").commit()
+    }
+
+    private fun openDjScreen() {
+        val fm = supportFragmentManager
+        if (fm.findFragmentByTag("dj") != null) return
+        val f = DjFragment.new(PlayerHub.service?.djMood, PlayerHub.service?.playlistName ?: "Modo DJ", -4).apply { arguments?.putBoolean("start", false) }
+        fm.beginTransaction()
+            .setCustomAnimations(R.anim.slide_up, R.anim.fade_out_short, R.anim.fade_in_short, R.anim.slide_down)
+            .add(overlay.id, f, "dj").addToBackStack("dj").commit()
+    }
+
+    /** Pide una vez el permiso para la pantalla de bloqueo propia. */
+    private fun askOverlayOnce() {
+        val p = Prefs2(this)
+        if (!p.lockScreen || p.overlayAsked || android.provider.Settings.canDrawOverlays(this)) return
+        p.overlayAsked = true
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+            .setTitle("Tu música en la pantalla de bloqueo 🔒")
+            .setMessage("Para mostrar la portada y los controles con el celular bloqueado (en todas las marcas, también Huawei), " +
+                "activa «Mostrar sobre otras apps» para DownSong. En Huawei activa también «Inicio automático» en Ajustes › Batería.")
+            .setPositiveButton("Activar") { _, _ ->
+                runCatching { startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName"))) }
+            }
+            .setNegativeButton("Ahora no", null).show()
+    }
+
     fun openPlayer() {
+        if (PlayerHub.service?.dj != null) { openDjScreen(); return }
         if (PlayerHub.service?.current() == null) return
         val fm = supportFragmentManager
         if (fm.findFragmentByTag(TAG_PLAYER) != null) return
@@ -278,8 +412,9 @@ class MainActivity : AppCompatActivity() {
     private fun renderMini() {
         val s = PlayerHub.service
         val t = s?.current()
-        mini.visibility = if (t == null) View.GONE else View.VISIBLE
+        mini.visibility = if (t == null || tab == 2) View.GONE else View.VISIBLE
         if (t == null || s == null) { paintNav(); return }
+        if (s.active.isPlaying) askOverlayOnce()
         miniTitle.text = t.title
         miniSub.text = t.artist.ifEmpty { s.playlistName }
         miniPlay.setImageResource(if (s.active.isPlaying) R.drawable.ic_pause else R.drawable.ic_play)

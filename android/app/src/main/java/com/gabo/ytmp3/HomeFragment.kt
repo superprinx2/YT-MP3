@@ -29,6 +29,11 @@ class HomeFragment : Fragment() {
     private lateinit var localSub: TextView
     private lateinit var djSub: TextView
     private lateinit var djKaleido: KaleidoView
+    private lateinit var djKaleido2: KaleidoView
+    private lateinit var stats: LinearLayout
+    private lateinit var statsCover: ImageView
+    private lateinit var statsTitle: TextView
+    private lateinit var statsSub: TextView
     private lateinit var recentRow: LinearLayout
     private lateinit var recentTitle: TextView
     private var all: List<Track> = emptyList()
@@ -56,26 +61,47 @@ class HomeFragment : Fragment() {
         grid.addView(local, lp(0, c.dp(150), 1f).apply { marginStart = c.dp(6) })
         col.addView(grid)
 
-        // Modo DJ con el caleidoscopio de fondo
-        val dj = FrameLayout(c).apply {
+        // Modo DJ: aleatorio total o por estado de ánimo
+        val djRow = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL }
+        fun djCard(title: String, sub: String, tint: Int, onClick: () -> Unit) = FrameLayout(c).apply {
             clipToOutline = true; background = roundRect(Color.BLACK, c.dp(14).toFloat())
             foreground = c.getDrawable(android.R.drawable.list_selector_background)
-            setOnClickListener { it.haptic(true); startDj() }
+            addView(KaleidoView(c).apply { seed = tint.toLong(); tag = "k" }, FrameLayout.LayoutParams(MATCH, MATCH))
+            addView(View(c).apply { setBackgroundColor(0x99000000.toInt()) }, FrameLayout.LayoutParams(MATCH, MATCH))
+            val inner = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL; setPadding(c.dp(14), c.dp(14), c.dp(14), c.dp(14)) }
+            inner.addView(VinylView(c, tint), lp(c.dp(54), c.dp(54)))
+            inner.addView(View(c), lp(1, 0, 1f))
+            inner.addView(c.text(title, 18f, Color.WHITE, 2, 2))
+            inner.addView(c.text(sub, 12f, 0xDDFFFFFF.toInt(), 0, 2))
+            addView(inner, FrameLayout.LayoutParams(MATCH, MATCH))
+            setOnClickListener { it.haptic(true); onClick() }
         }
-        djKaleido = KaleidoView(c).apply { seed = 4242 }
-        dj.addView(djKaleido, FrameLayout.LayoutParams(MATCH, MATCH))
-        dj.addView(View(c).apply { background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xCC000000.toInt(), 0x22000000)) },
-            FrameLayout.LayoutParams(MATCH, MATCH))
-        val djText = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL; setPadding(c.dp(18), c.dp(16), c.dp(18), c.dp(16)) }
-        djText.addView(c.text("🎧 Modo DJ", 24f, Color.WHITE, 2))
-        djSub = c.text("Canciones al azar de toda tu biblioteca", 14f, 0xDDFFFFFF.toInt(), 0, 2)
-        djText.addView(djSub)
-        djText.addView(c.text("▶  Empezar", 15f, Color.WHITE, 2).apply {
-            gravity = Gravity.CENTER; minHeight = c.dp(38); setPadding(c.dp(18), 0, c.dp(18), 0)
-            background = roundRect(BRAND_RED, c.dp(19).toFloat())
-        }, lp(WRAP, WRAP).apply { topMargin = c.dp(12) })
-        dj.addView(djText, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.CENTER_VERTICAL))
-        col.addView(dj, lp(MATCH, c.dp(170)).apply { topMargin = c.dp(12) })
+        val dj1 = djCard("🎧 Modo DJ", "Aleatorio total, directo", BRAND_RED) { startDj() }
+        val dj2 = djCard("🎧 Por estado de ánimo", "¿Cómo te sientes hoy?", 0xFFB14DFF.toInt()) { (activity as? MainActivity)?.openMoods() }
+        djRow.addView(dj1, lp(0, c.dp(170), 1f).apply { marginEnd = c.dp(6) })
+        djRow.addView(dj2, lp(0, c.dp(170), 1f).apply { marginStart = c.dp(6) })
+        col.addView(djRow, lp(MATCH, WRAP).apply { topMargin = c.dp(12) })
+        djKaleido = dj1.findViewWithTag("k")
+        djKaleido2 = dj2.findViewWithTag("k")
+        djSub = c.text("", 1f, Color.TRANSPARENT)
+
+        // Tus estadísticas
+        stats = LinearLayout(c).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(c.dp(14), c.dp(12), c.dp(14), c.dp(12))
+            background = roundRect(c.col(R.color.ios_card), c.dp(14).toFloat())
+            foreground = c.getDrawable(android.R.drawable.list_selector_background)
+            setOnClickListener { it.haptic(); showStats() }
+        }
+        statsCover = ImageView(c)
+        stats.addView(statsCover, lp(c.dp(64), c.dp(64)))
+        val st = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL; setPadding(c.dp(12), 0, 0, 0) }
+        st.addView(c.text("📊 Tu canción del mes", 12f, c.col(R.color.ios_secondary), 1))
+        statsTitle = c.text("Escucha música y aquí verás tus estadísticas", 16f, c.col(R.color.ios_label), 2, 2)
+        statsSub = c.text("", 13f, c.col(R.color.ios_secondary))
+        st.addView(statsTitle); st.addView(statsSub)
+        stats.addView(st, lp(0, WRAP, 1f))
+        col.addView(stats, lp(MATCH, WRAP).apply { topMargin = c.dp(12) })
 
         recentTitle = c.text("Escuchado recientemente", 20f, c.col(R.color.ios_label), 2).apply { setPadding(0, c.dp(24), 0, c.dp(10)) }
         col.addView(recentTitle)
@@ -91,18 +117,20 @@ class HomeFragment : Fragment() {
                 dao.recentTracks().collect { recent = it; bindRecent() }
             }
         }
+        (activity as? MainActivity)?.onBottomInset { b -> col.setPadding(c.dp(16), c.dp(14), c.dp(16), c.dp(24) + b) }
         return scroll
     }
 
     override fun onResume() {
         super.onResume()
         avatar.setImageBitmap(Covers.avatarBitmap(requireContext()))
-        djKaleido.running = true
+        djKaleido.running = true; djKaleido2.running = true
+        loadStats()
     }
 
-    override fun onPause() { djKaleido.running = false; super.onPause() }
+    override fun onPause() { djKaleido.running = false; djKaleido2.running = false; super.onPause() }
 
-    override fun onHiddenChanged(hidden: Boolean) { djKaleido.running = !hidden }
+    override fun onHiddenChanged(hidden: Boolean) { djKaleido.running = !hidden; djKaleido2.running = !hidden; if (!hidden) loadStats() }
 
     private fun settings(section: String?) =
         startActivity(Intent(requireContext(), SettingsActivity::class.java).putExtra(SettingsActivity.EXTRA_SECTION, section))
@@ -141,12 +169,40 @@ class HomeFragment : Fragment() {
     }
 
     private fun startDj() {
-        if (all.isEmpty()) { Toast.makeText(requireContext(), "Tu biblioteca está vacía", Toast.LENGTH_SHORT).show(); return }
-        val list = all.shuffled()
-        PlayerHub.with(requireActivity()) { s ->
-            s.setShuffle(true)
-            s.play(list, 0, -4, "Modo DJ", false, shuffleStart = true)
-            (activity as? MainActivity)?.openPlayer()
+        if (all.size < 2) { Toast.makeText(requireContext(), "Necesitas al menos 2 canciones", Toast.LENGTH_SHORT).show(); return }
+        (activity as? MainActivity)?.openDj(null, null, null, "Aleatorio total")
+    }
+
+    private fun monthStart(): Long = java.util.Calendar.getInstance().apply {
+        set(java.util.Calendar.DAY_OF_MONTH, 1); set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
+    }.timeInMillis
+
+    private fun loadStats() {
+        val c = context ?: return
+        viewLifecycleOwner.lifecycleScope.launch {
+            val dao = Library.dao(c)
+            val since = monthStart()
+            val top = dao.topSince(since, 1).firstOrNull() ?: return@launch
+            val t = dao.track(top.trackId) ?: return@launch
+            val hours = dao.msSince(since) / 3_600_000.0
+            statsCover.cover(t, 8f)
+            statsTitle.text = t.title
+            statsSub.text = "${top.n} veces · ${String.format(java.util.Locale.US, "%.1f", hours)} h escuchadas este mes"
+        }
+    }
+
+    private fun showStats() {
+        val a = activity as? androidx.appcompat.app.AppCompatActivity ?: return
+        viewLifecycleOwner.lifecycleScope.launch {
+            val dao = Library.dao(a)
+            val rows = dao.topSince(monthStart(), 10)
+            if (rows.isEmpty()) return@launch
+            val map = dao.tracksByIds(rows.map { it.trackId }).associateBy { it.id }
+            val list = rows.mapNotNull { r -> map[r.trackId]?.let { it to r.n } }
+            ActionSheet.show(a, "Tus más escuchadas del mes", list.mapIndexed { i, (t, n) -> "${i + 1}. ${t.title} · $n" }) { i ->
+                val tracks = list.map { it.first }
+                PlayerHub.with(a) { s -> s.play(tracks, i, null, "Tus más escuchadas", false); (activity as? MainActivity)?.openPlayer() }
+            }
         }
     }
 }

@@ -124,15 +124,43 @@ object AppUpdater {
                 if (manual) Toast.makeText(activity, "Ya tienes la última versión ($current) ✓", Toast.LENGTH_LONG).show()
                 return@launch
             }
-            if (!manual && prefs.getString("app_update_skipped", null) == latest) return@launch
+            val p2 = Prefs2(activity)
+            if (!manual && System.currentTimeMillis() < p2.updateSnoozeUntil) return@launch
             if (activity.isFinishing) return@launch
-            MaterialAlertDialogBuilder(activity)
-                .setTitle("¡DownSong $latest disponible! 🚀")
-                .setMessage("Tienes la versión $current. La nueva se instala encima, sin perder tus ajustes.")
-                .setPositiveButton("Actualizar ahora") { _, _ -> install(activity, latest) }
-                .setNegativeButton("Más tarde") { _, _ -> prefs.edit().putString("app_update_skipped", latest).apply() }
-                .show()
+            sheet(activity, latest, current) { p2.updateSnoozeUntil = System.currentTimeMillis() + 24L * 60 * 60 * 1000 }
         }
+    }
+
+    /** Hoja "Hay una versión nueva" con el estilo de la app. */
+    private fun sheet(a: AppCompatActivity, latest: String, current: String, later: () -> Unit) {
+        val d = android.app.Dialog(a)
+        val root = android.widget.LinearLayout(a).apply { orientation = android.widget.LinearLayout.VERTICAL; setPadding(a.dp(8), 0, a.dp(8), a.dp(8)) }
+        val card = android.widget.LinearLayout(a).apply {
+            orientation = android.widget.LinearLayout.VERTICAL; gravity = android.view.Gravity.CENTER_HORIZONTAL
+            setBackgroundResource(R.drawable.bg_card); setPadding(a.dp(20), a.dp(24), a.dp(20), a.dp(20))
+        }
+        card.addView(android.widget.ImageView(a).apply { setImageResource(R.drawable.logo_downsong) }, lp(a.dp(84), a.dp(84)))
+        card.addView(a.text("Hay una versión nueva de DownSong", 20f, a.col(R.color.ios_label), 2, 2).apply {
+            gravity = android.view.Gravity.CENTER; setPadding(0, a.dp(14), 0, a.dp(4)) })
+        card.addView(a.text("Versión $latest · tienes la $current", 14f, a.col(R.color.ios_secondary)).apply { gravity = android.view.Gravity.CENTER })
+        root.addView(card)
+        root.addView(a.text("Actualizar ahora", 18f, android.graphics.Color.WHITE, 2).apply {
+            gravity = android.view.Gravity.CENTER; minHeight = a.dp(54); background = roundRect(BRAND_RED, a.dp(14).toFloat())
+            setOnClickListener { d.dismiss(); install(a, latest) }
+        }, lp(MATCH, WRAP).apply { topMargin = a.dp(8) })
+        root.addView(a.text("Más tarde", 18f, a.col(R.color.ios_blue), 1).apply {
+            gravity = android.view.Gravity.CENTER; minHeight = a.dp(54); setBackgroundResource(R.drawable.bg_row_single)
+            setOnClickListener { later(); d.dismiss() }
+        }, lp(MATCH, WRAP).apply { topMargin = a.dp(8) })
+        d.setContentView(root)
+        d.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+            setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+            setGravity(android.view.Gravity.BOTTOM); setWindowAnimations(android.R.style.Animation_InputMethod)
+            addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND); setDimAmount(0.45f)
+        }
+        d.setOnCancelListener { later() }
+        d.show()
     }
 
     private fun install(activity: AppCompatActivity, version: String) {

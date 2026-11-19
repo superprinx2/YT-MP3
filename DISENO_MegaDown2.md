@@ -50,3 +50,11 @@ Cuentas · Perfil · Actualizaciones · Apoya DownSong · Acerca de.
 ## Fases
 0. Nombre, logo, bienvenida y perfil. 1. Biblioteca + reproductor + ajustes.
 2. Descargar rediseñado + réplica de YouTube. 3. Réplicas de Spotify/TikTok/IG/FB. 4. Compartir con QR.
+
+## v2.2 (publicada)
+Pantalla completa con cristal, réplicas con recuadro que se esconde y barritas, pantalla de bloqueo propia,
+cierre real al quitar la app de recientes, hoja de actualización ("Más tarde" = mañana), nueva pantalla para
+agregar música, ecualizador con perfiles, aleatorio que prioriza lo menos escuchado, gestos en el mini-reproductor,
+estadísticas del mes, modos Máximo/Equilibrado/Ahorro, saltar silencios, visualizador OpenGL, Modo DJ
+(análisis BPM/coro/pausas, 11 efectos, Saltar animado, 12 estados de ánimo, IA YAMNet + diccionario + aprendizaje,
+DJ desde playlist y desde canción).

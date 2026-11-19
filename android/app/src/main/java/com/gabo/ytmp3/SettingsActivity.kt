@@ -104,7 +104,7 @@ class SettingsActivity : AppCompatActivity() {
         content.removeAllViews()
         val sec = section
         val label = if (sec == null) "Ajustes" else when (sec) {
-            "profile" -> "Perfil"; "support" -> "Apoya DownSong"; "about" -> "Acerca de"
+            "profile" -> "Perfil"; "support" -> "Apoya DownSong"; "about" -> "Acerca de"; "eq" -> "Ecualizador"
             else -> sections.firstOrNull { it.first == sec }?.third ?: "Ajustes"
         }
         // Barra superior: "‹ Atrás" + título grande
@@ -123,6 +123,7 @@ class SettingsActivity : AppCompatActivity() {
         when (sec) {
             null -> buildRoot()
             "playback" -> buildPlayback()
+            "eq" -> buildEq()
             "appearance" -> buildAppearance()
             "lock" -> buildLock()
             "downloads" -> { buildSpeed(); buildBackground(); buildStats() }
@@ -200,6 +201,37 @@ class SettingsActivity : AppCompatActivity() {
         content.addView(card)
         footer("De 1 a 12 segundos. Así no sientes la pausa entre canción y canción.")
 
+        header("Sonido")
+        val ce = card()
+        ce.addView(row("🎚️", "Ecualizador", if (prefs2.eqOn) prefs2.eqPreset else "Apagado", position = Pos.SINGLE) { open("eq") })
+        content.addView(ce)
+        val cs = card()
+        content.addView(View(this), LinearLayout.LayoutParams(1, dp(12f)))
+        cs.addView(switchRow("Saltar silencios", "Omite los silencios largos al inicio y al final de cada canción", prefs2.skipSilence) {
+            prefs2.skipSilence = it
+        })
+        content.addView(cs)
+
+        header("Modo DJ")
+        val cd = card()
+        val fxVal = TextView(this).apply { textSize = 15f; setTextColor(color(R.color.ios_secondary)); text = "${(prefs2.djFxVolume * 100).toInt()} %" }
+        cd.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(14f), dp(12f), dp(14f), 0)
+            addView(TextView(this@SettingsActivity).apply { text = "Volumen de los efectos DJ"; textSize = 16f; setTextColor(color(R.color.ios_label)) },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(fxVal)
+        })
+        cd.addView(android.widget.SeekBar(this).apply {
+            max = 100; progress = (prefs2.djFxVolume * 100).toInt(); setPadding(dp(18f), dp(8f), dp(18f), dp(14f))
+            setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s: android.widget.SeekBar, p: Int, u: Boolean) { prefs2.djFxVolume = p / 100f; fxVal.text = "$p %" }
+                override fun onStartTrackingTouch(s: android.widget.SeekBar) {}
+                override fun onStopTrackingTouch(s: android.widget.SeekBar) { s.haptic(); DjFx.play(this@SettingsActivity, prefs2.djFxVolume) }
+            })
+        })
+        content.addView(cd)
+        footer("Suena un efecto de mezcla (barrido, scratch, bocina…) cada vez que el DJ cambia de canción.")
+
         header("Volumen")
         val c2 = card()
         c2.addView(switchRow("Nivelar volumen", "Todas las canciones suenan con el mismo volumen", prefs2.normalize) {
@@ -226,6 +258,22 @@ class SettingsActivity : AppCompatActivity() {
         }
         content.addView(card)
 
+        header("Modo de uso")
+        val cu = card()
+        UsageMode.entries.forEachIndexed { i, m ->
+            if (i > 0) cu.addView(separator(14))
+            val sub = when (m) {
+                UsageMode.MAX -> "Visualizador a 60 cuadros, efectos al máximo"
+                UsageMode.BALANCED -> "El equilibrio ideal entre fluidez y batería"
+                UsageMode.SAVER -> "Para celulares básicos o ahorrar batería: menos animaciones y efectos"
+            }
+            cu.addView(checkRow(m.label, sub, prefs2.usage == m, when (i) { 0 -> Pos.TOP; 2 -> Pos.BOTTOM; else -> Pos.MID }) {
+                prefs2.usage = m; toast("Modo ${m.label} activado. Se aplica por completo al volver a abrir la app."); build()
+            })
+        }
+        content.addView(cu)
+        footer("La música, el crossfade, el ecualizador y el análisis del DJ funcionan igual en todos los modos.")
+
         header("Portadas")
         val c2 = card()
         c2.addView(switchRow("Canciones sin portada: efecto caleidoscopio", "Figuras de colores que se mueven con la música", prefs2.kaleidoNoCover) {
@@ -240,6 +288,22 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun buildLock() {
+        header("Pantalla de bloqueo DownSong")
+        val cl = card()
+        cl.addView(switchRow("Pantalla de bloqueo propia", "Portada a pantalla completa y todos los controles con el celular bloqueado", prefs2.lockScreen) {
+            prefs2.lockScreen = it
+            if (it && !Settings.canDrawOverlays(this)) startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+        })
+        cl.addView(separator(14))
+        val ok = Settings.canDrawOverlays(this)
+        cl.addView(row("🪟", "Permiso «Mostrar sobre otras apps»", if (ok) "Activado ✓" else "Activar",
+            valueColor = if (ok) R.color.ios_green else R.color.ios_blue, position = Pos.BOTTOM) {
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+        })
+        content.addView(cl)
+        footer("Funciona en todas las marcas (Huawei, Xiaomi, Samsung…). Desliza hacia arriba para ir a tu bloqueo normal: tu PIN o huella siguen igual. " +
+            "En Huawei activa también «Inicio automático» para DownSong en Ajustes › Batería.")
+
         header("Pantalla de bloqueo")
         val card = card()
         card.addView(switchRow("Botones aleatorio y repetir", "Además de anterior, pausa y siguiente", prefs2.lockButtons) {
@@ -333,6 +397,50 @@ class SettingsActivity : AppCompatActivity() {
         }
         content.addView(c2)
         footer("Tu perfil solo vive en este celular.")
+    }
+
+    private fun buildEq() {
+        val card = card()
+        card.addView(switchRow("Ecualizador", "Ajusta el sonido a tu gusto", prefs2.eqOn) {
+            prefs2.eqOn = it; PlaybackService.instance?.applyEq()
+        })
+        content.addView(card)
+        header("Perfiles")
+        val curve = EqCurveView(this).apply { bands = Eq.bands(prefs2) }
+        val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(4f), 0, dp(8f)) }
+        fun paintChips() {
+            for (i in 0 until chips.childCount) {
+                val v = chips.getChildAt(i) as TextView
+                val on = v.text == prefs2.eqPreset
+                v.background = roundRect(if (on) BRAND_RED else color(R.color.ios_card), dp(18f).toFloat())
+                v.setTextColor(if (on) android.graphics.Color.WHITE else color(R.color.ios_label))
+            }
+        }
+        Eq.presets.keys.forEach { name ->
+            chips.addView(TextView(this).apply {
+                text = name; textSize = 14f; typeface = semibold; gravity = Gravity.CENTER
+                setPadding(dp(16f), dp(9f), dp(16f), dp(9f))
+                setOnClickListener {
+                    it.haptic(); prefs2.eqPreset = name; prefs2.eqOn = true
+                    curve.bands = Eq.bands(prefs2); paintChips(); PlaybackService.instance?.applyEq()
+                }
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(8f) })
+        }
+        paintChips()
+        content.addView(android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(chips) })
+        val cc = card()
+        curve.setPadding(dp(8f), 0, dp(8f), 0)
+        curve.onChange = { b -> prefs2.setEqBands(prefs2.eqPreset, b); prefs2.eqOn = true; PlaybackService.instance?.applyEq() }
+        cc.addView(curve, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(230f)))
+        content.addView(cc)
+        footer("Arrastra los puntos hacia arriba o abajo para modificar el perfil. Cada perfil guarda tus cambios.")
+        val cr = card()
+        content.addView(View(this), LinearLayout.LayoutParams(1, dp(12f)))
+        cr.addView(row("↺", "Restablecer «${prefs2.eqPreset}»", "", position = Pos.SINGLE) {
+            Eq.presets[prefs2.eqPreset]?.let { prefs2.setEqBands(prefs2.eqPreset, it) }
+            curve.bands = Eq.bands(prefs2); PlaybackService.instance?.applyEq()
+        })
+        content.addView(cr)
     }
 
     private fun checkRow(label: String, sub: String, checked: Boolean, position: Pos, onClick: () -> Unit) =

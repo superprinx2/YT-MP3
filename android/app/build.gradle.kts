@@ -19,8 +19,8 @@ android {
         applicationId = "com.gabo.ytmp3"
         minSdk = 26
         targetSdk = 34
-        versionCode = 11
-        versionName = "2.1"
+        versionCode = 12
+        versionName = "2.2"
     }
 
     signingConfigs {
@@ -60,6 +60,7 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { viewBinding = true }
+    androidResources { noCompress += "tflite" }
 }
 
 dependencies {
@@ -85,4 +86,6 @@ dependencies {
     implementation("androidx.room:room-runtime:$room")
     implementation("androidx.room:room-ktx:$room")
     ksp("androidx.room:room-compiler:$room")
+    implementation("org.tensorflow:tensorflow-lite:2.16.1")
+    implementation("com.github.Dimezis:BlurView:version-2.0.6")
 }

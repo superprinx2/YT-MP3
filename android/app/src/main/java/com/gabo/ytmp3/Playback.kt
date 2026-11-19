@@ -8,6 +8,10 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.audiofx.LoudnessEnhancer
+import android.media.audiofx.Equalizer
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import android.provider.Settings
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -78,6 +82,19 @@ class PlaybackService : MediaSessionService() {
     private val other get() = if (active === p1) p2 else p1
     private lateinit var session: MediaSession
     private val enhancers = HashMap<ExoPlayer, LoudnessEnhancer?>()
+    private val eqs = HashMap<ExoPlayer, Equalizer?>()
+
+    // Modo DJ
+    var dj: DjSession? = null
+        private set
+    var djMood: Mood? = null
+        private set
+    private var djSegStart = 0L
+    private var djSegEnd = 0L
+    private var djPending: Pair<Long, Long>? = null
+    private var djInternal = false
+    val djUpcoming: List<Track> get() = dj?.plan?.map { it.first }.orEmpty()
+    val djSegment: Pair<Long, Long> get() = djSegStart to djSegEnd
     private lateinit var prefs: Prefs2
 
     /** Cola actual (en orden de la playlist). */
@@ -108,6 +125,7 @@ class PlaybackService : MediaSessionService() {
                 val s = b.short / 32768f
                 lp += (s - lp) * 0.02f
                 sum += s * s; sumLow += lp * lp; n++
+                AudioData.push(s)
                 if (b.remaining() >= 14) b.position(b.position() + 6)   // muestreo cada 4
             }
             if (n == 0) return
@@ -133,6 +151,7 @@ class PlaybackService : MediaSessionService() {
         val sid = Util.generateAudioSessionIdV21(this)
         p.setAudioSessionId(sid)
         enhancers[p] = runCatching { LoudnessEnhancer(sid).apply { enabled = true } }.getOrNull()
+        eqs[p] = runCatching { Equalizer(0, sid) }.getOrNull()?.also { Eq.apply(it, Prefs2(this)) }
         p.addListener(PlayerListener(p))
         return p
     }
@@ -161,6 +180,32 @@ class PlaybackService : MediaSessionService() {
         handler.post(tick)
         notifyUi()
         restore()
+        androidx.core.content.ContextCompat.registerReceiver(this, screenOff, IntentFilter(Intent.ACTION_SCREEN_OFF),
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
+    }
+
+    /** Pantalla de bloqueo propia: al apagar la pantalla con música sonando. */
+    private val screenOff = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            Log.i(TAG, "pantalla apagada: lock=${prefs.lockScreen} sonando=${active.playWhenReady} overlay=${Settings.canDrawOverlays(c)}")
+            if (!prefs.lockScreen || !active.playWhenReady || active.mediaItemCount == 0) return
+            if (!Settings.canDrawOverlays(c)) return
+            runCatching {
+                Log.i(TAG, "abriendo pantalla de bloqueo propia")
+                startActivity(Intent(c, LockActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_NO_ANIMATION or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS))
+            }
+        }
+    }
+
+    fun applyEq() { val pr = Prefs2(this); eqs.values.forEach { e -> e?.let { Eq.apply(it, pr) } } }
+
+    /** Aleatorio que prioriza lo que menos ha sonado y no repite hasta pasar por todas. */
+    private fun smartOrder(list: List<Track>, first: Int): ShuffleOrder {
+        val rnd = java.util.Random()
+        val idx = list.indices.sortedBy { list[it].playCount + rnd.nextFloat() * 3f }.toMutableList()
+        if (first in idx) { idx.remove(first); idx.add(0, first) }
+        return ShuffleOrder.DefaultShuffleOrder(idx.toIntArray(), rnd.nextLong())
     }
 
     // ------------------------------------------------------------------ recordar lo último que sonaba
@@ -191,7 +236,7 @@ class PlaybackService : MediaSessionService() {
                 val seed = SystemClock.elapsedRealtime()
                 for (p in listOf(p1, p2)) {
                     p.setMediaItems(items, idx, if (p === active) prefs.qPos else 0)
-                    p.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(items.size, seed))
+                    p.setShuffleOrder(smartOrder(list, idx))
                 }
                 active.volume = volFor(list[idx]); applyBoost(active, list[idx])
                 active.playWhenReady = false
@@ -204,21 +249,32 @@ class PlaybackService : MediaSessionService() {
     private fun bump(t: Track?) {
         t ?: return
         val now = System.currentTimeMillis()
-        App.scope.launch { runCatching { Library.dao(this@PlaybackService).bump(t.id, now) } }
+        App.scope.launch { runCatching { Library.dao(this@PlaybackService).bump(t.id, now); Library.dao(this@PlaybackService).insertPlay(Play(trackId = t.id, at = now)) } }
     }
 
     private var saveTicks = 0
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = session
 
+    /** Al cerrar la app desde "recientes": se cierra de verdad (sin música ni notificación). */
     override fun onTaskRemoved(rootIntent: Intent?) {
-        if (!active.playWhenReady || active.mediaItemCount == 0) stopSelf()
+        save()
+        exitDj()
+        cancelFade()
+        for (p in listOf(p1, p2)) { p.stop(); p.clearMediaItems() }
+        queue = emptyList()
+        PlayerHub.release()
+        stopSelf()
+        if (!DownloadState.running) handler.postDelayed({ android.os.Process.killProcess(android.os.Process.myPid()) }, 600)
     }
 
     override fun onDestroy() {
         save()
+        runCatching { unregisterReceiver(screenOff) }
         instance = null
         handler.removeCallbacksAndMessages(null)
+        eqs.values.forEach { it?.release() }
+        DjFx.release()
         session.release()
         enhancers.values.forEach { it?.release() }
         p1.release(); p2.release()
@@ -232,7 +288,13 @@ class PlaybackService : MediaSessionService() {
     private fun item(t: Track): MediaItem {
         val art = Covers.fileFor(this, t)
         val uri = if (showVideo && t.hasVideo) t.videoUri()!! else t.audioUri()
-        return MediaItem.Builder().setMediaId(t.id.toString()).setUri(uri)
+        val clip = MediaItem.ClippingConfiguration.Builder().apply {
+            if (prefs.skipSilence && dj == null) {
+                t.introMs?.takeIf { it > 300 }?.let { setStartPositionMs(it) }
+                t.outroMs?.takeIf { it > 0 && (t.durationMs == 0L || it < t.durationMs - 500) }?.let { setEndPositionMs(it) }
+            }
+        }.build()
+        return MediaItem.Builder().setMediaId(t.id.toString()).setUri(uri).setClippingConfiguration(clip)
             .setMediaMetadata(MediaMetadata.Builder()
                 .setTitle(t.title).setArtist(t.artist.ifEmpty { null })
                 .setAlbumTitle(playlistName.ifEmpty { null })
@@ -245,6 +307,7 @@ class PlaybackService : MediaSessionService() {
     fun play(tracks: List<Track>, start: Int, plId: Long?, plName: String, video: Boolean, shuffleStart: Boolean = false) {
         if (tracks.isEmpty()) return
         cancelFade()
+        exitDj()
         queue = tracks; playlistId = plId; playlistName = plName; showVideo = video
         if (shuffleStart) setShuffle(true)
         val items = tracks.map(::item)
@@ -255,7 +318,8 @@ class PlaybackService : MediaSessionService() {
         for (p in listOf(p1, p2)) {
             p.stop()
             p.setMediaItems(items, idx, 0)
-            p.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(items.size, seed))
+            p.setShuffleOrder(smartOrder(tracks, idx))
+            p.setPlaybackSpeed(1f)
         }
         active.volume = volFor(tracks[idx])
         applyBoost(active, tracks[idx])
@@ -291,6 +355,11 @@ class PlaybackService : MediaSessionService() {
 
     fun setShuffle(on: Boolean) {
         prefs.shuffle = on
+        if (on && queue.isNotEmpty() && dj == null) {
+            val order = smartOrder(queue, active.currentMediaItemIndex)
+            for (p in listOf(p1, p2)) if (p.mediaItemCount == queue.size) p.setShuffleOrder(order)
+        }
+        if (dj != null) { updateButtons(); notifyUi(); return }
         p1.shuffleModeEnabled = on; p2.shuffleModeEnabled = on
         updateButtons(); notifyUi()
     }
@@ -307,7 +376,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     fun togglePlay() { if (active.isPlaying) active.pause() else { if (active.playbackState == Player.STATE_ENDED) active.seekTo(0, 0); active.play() } }
-    fun next() { cancelFade(); if (active.hasNextMediaItem()) active.seekToNextMediaItem() }
+    fun next() { if (dj != null) { djNext(true); return }; cancelFade(); if (active.hasNextMediaItem()) active.seekToNextMediaItem() }
     fun prev() { cancelFade(); active.seekToPrevious() }
     fun seekTo(ms: Long) { cancelFade(); active.seekTo(ms) }
     fun jumpTo(index: Int) { cancelFade(); active.seekTo(index, 0); active.play() }
@@ -338,6 +407,10 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun step() {
+        if (!fading && dj != null) {
+            if (active.isPlaying && active.currentPosition >= djSegEnd) djNext(false)
+            return
+        }
         if (!fading) {
             if (!prefs.crossfadeOn || !active.isPlaying || active.repeatMode == Player.REPEAT_MODE_ONE) return
             if (!active.hasNextMediaItem()) return
@@ -357,21 +430,82 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun startFade(left: Long) {
-        val out = active; val inc = other
-        val idx = out.nextMediaItemIndex
+        val idx = active.nextMediaItemIndex
         if (idx == C.INDEX_UNSET) return
+        startFadeTo(idx, 0, 1f, (left - 250).coerceAtLeast(500))
+    }
+
+    private fun startFadeTo(idx: Int, posMs: Long, speed: Float, lenMs: Long) {
+        val out = active; val inc = other
         out.setAudioAttributes(attrs, false)
         inc.setAudioAttributes(attrs, true)
         inc.shuffleModeEnabled = out.shuffleModeEnabled
         inc.repeatMode = out.repeatMode
-        inc.seekTo(idx, 0)
+        inc.seekTo(idx, posMs)
+        inc.setPlaybackSpeed(speed)
         inc.volume = 0f
         applyBoost(inc, queue.firstOrNull { it.id.toString() == inc.getMediaItemAt(idx).mediaId })
         inc.prepare()
         inc.play()
         fading = true
         fadeStart = SystemClock.elapsedRealtime()
-        fadeLen = (left - 250).coerceAtLeast(500)
+        fadeLen = lenMs
+    }
+
+    // ------------------------------------------------------------------ Modo DJ
+    /** Empieza el DJ: canciones al azar de ritmo parecido, desde el coro, con efectos entre canciones. */
+    fun startDj(tracks: List<Track>, mood: Mood?, start: Track?, name: String, scores: Map<Long, Float>, plId: Long = -4) {
+        if (tracks.isEmpty()) return
+        cancelFade()
+        val s = DjSession(tracks, mood, scores)
+        val first = s.first(start)
+        dj = s; djMood = mood
+        queue = tracks; playlistId = plId; playlistName = name; showVideo = false
+        val items = tracks.map(::item)
+        val idx = tracks.indexOfFirst { it.id == first.id }.coerceAtLeast(0)
+        other.setAudioAttributes(attrs, false)
+        active.setAudioAttributes(attrs, true)
+        for (p in listOf(p1, p2)) {
+            p.stop(); p.setMediaItems(items, idx, 0)
+            p.shuffleModeEnabled = false; p.repeatMode = Player.REPEAT_MODE_OFF; p.setPlaybackSpeed(1f)
+        }
+        val (st, en) = s.segment(first)
+        djSegStart = st; djSegEnd = en; djPending = null
+        djInternal = true
+        active.seekTo(idx, st)
+        djInternal = false
+        active.volume = volFor(first); applyBoost(active, first)
+        active.prepare(); active.play()
+        DjFx.preload(this)
+        bump(first); updateButtons(); notifyUi()
+    }
+
+    /** Siguiente canción del DJ (sola al llegar a la pausa del coro, o con "Saltar"). */
+    fun djNext(skip: Boolean) {
+        val s = dj ?: return
+        if (fading) completeFade()
+        val cur = trackOf(active) ?: return
+        val listened = active.currentPosition - djSegStart
+        val delta = if (skip && listened < 20_000) -1f else if (!skip) 0.4f else 0f
+        if (delta != 0f) App.scope.launch { runCatching { DjBrain.learn(this@PlaybackService, cur.id, djMood, delta) } }
+        val (nt, speed) = s.advance(cur)
+        val idx = queue.indexOfFirst { it.id == nt.id }
+        if (idx < 0) return
+        val seg = s.segment(nt)
+        DjFx.play(this, prefs.djFxVolume)
+        val len = if (prefs.crossfadeOn) (prefs.crossfadeSec * 1000L).coerceIn(1500L, 5000L) else 1500L
+        djInternal = true
+        startFadeTo(idx, seg.first, speed, len)
+        djInternal = false
+        djPending = seg
+        notifyUi()
+    }
+
+    fun exitDj() {
+        if (dj == null) return
+        dj = null; djMood = null; djPending = null
+        for (p in listOf(p1, p2)) { p.setPlaybackSpeed(1f); p.shuffleModeEnabled = prefs.shuffle; p.repeatMode = prefs.repeat }
+        updateButtons(); notifyUi()
     }
 
     private fun completeFade() {
@@ -383,6 +517,7 @@ class PlaybackService : MediaSessionService() {
         active = inc
         inc.volume = volFor(trackOf(inc))
         session.player = inc
+        if (dj != null) djPending?.let { djSegStart = it.first; djSegEnd = it.second; djPending = null }
         updateButtons()
         bump(trackOf(inc)); save()
         notifyUi()
@@ -401,7 +536,11 @@ class PlaybackService : MediaSessionService() {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             if (p === active && fading) {
                 if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) { completeFade(); return }
-                cancelFade()
+                if (!djInternal) cancelFade()
+            }
+            // En el DJ, "siguiente" desde la notificación o los audífonos = saltar con efecto
+            if (p === active && dj != null && !djInternal && !fading && reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) {
+                handler.post { djNext(true) }
             }
             if (p === active) {
                 val t = trackOf(p)
@@ -421,8 +560,8 @@ class PlaybackService : MediaSessionService() {
             if (p !== active) return
             // Con aleatorio activado la música sigue: al terminar se vuelve a mezclar y continúa.
             if (playbackState == Player.STATE_ENDED && p.shuffleModeEnabled && p.mediaItemCount > 1) {
-                val seed = SystemClock.elapsedRealtime()
-                for (q in listOf(p1, p2)) q.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(q.mediaItemCount, seed))
+                val order = smartOrder(queue, -1)
+                for (q in listOf(p1, p2)) if (q.mediaItemCount == queue.size) q.setShuffleOrder(order)
                 p.seekTo(p.currentTimeline.getFirstWindowIndex(true), 0)
                 p.play()
             }
@@ -486,6 +625,11 @@ object Loudness {
     private var job: Job? = null
 
     fun kick(ctx: Context) {
+        Analyzer.kick(ctx)
+    }
+
+    @Suppress("unused")
+    private fun kickOld(ctx: Context) {
         val app = ctx.applicationContext
         if (job?.isActive == true) return
         job = App.scope.launch {

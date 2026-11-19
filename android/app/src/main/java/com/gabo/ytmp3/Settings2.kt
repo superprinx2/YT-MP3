@@ -3,10 +3,13 @@ package com.gabo.ytmp3
 import android.content.Context
 import androidx.appcompat.app.AppCompatDelegate
 
+enum class UsageMode(val label: String) { MAX("Máximo"), BALANCED("Equilibrado"), SAVER("Ahorro") }
+
 enum class AppTheme(val label: String) { LIGHT("Claro"), DARK("Oscuro"), SYSTEM("Sistema"), DYNAMIC("Dinámico") }
 
 /** Ajustes de DownSong 2 (reproductor, apariencia, perfil). */
 class Prefs2(ctx: Context) {
+    private val appCtx = ctx.applicationContext
     private val sp = ctx.applicationContext.getSharedPreferences("prefs2", Context.MODE_PRIVATE)
     private fun b(k: String, d: Boolean) = sp.getBoolean(k, d)
     private fun setB(k: String, v: Boolean) = sp.edit().putBoolean(k, v).apply()
@@ -27,6 +30,27 @@ class Prefs2(ctx: Context) {
     var lockButtons: Boolean get() = b("lock_btns", true); set(v) = setB("lock_btns", v)
 
     var shuffle: Boolean get() = b("shuffle", false); set(v) = setB("shuffle", v)
+
+    var usage: UsageMode
+        get() = runCatching { UsageMode.valueOf(sp.getString("usage", null)!!) }.getOrElse { defaultUsage() }
+        set(v) = sp.edit().putString("usage", v.name).apply()
+    private fun defaultUsage(): UsageMode {
+        val am = appCtx.getSystemService(android.app.ActivityManager::class.java)
+        val mi = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+        val m = if (mi.totalMem <= 3_300_000_000L || am.isLowRamDevice) UsageMode.SAVER else UsageMode.BALANCED
+        sp.edit().putString("usage", m.name).apply()
+        return m
+    }
+    val saver get() = usage == UsageMode.SAVER
+    var lockScreen: Boolean get() = b("lock_own", true); set(v) = setB("lock_own", v)
+    var skipSilence: Boolean get() = b("skip_sil", true); set(v) = setB("skip_sil", v)
+    var djFxVolume: Float get() = sp.getFloat("dj_fx", 0.8f); set(v) = sp.edit().putFloat("dj_fx", v).apply()
+    var eqOn: Boolean get() = b("eq_on", true); set(v) = setB("eq_on", v)
+    var eqPreset: String get() = sp.getString("eq_preset", "Normal") ?: "Normal"; set(v) = sp.edit().putString("eq_preset", v).apply()
+    fun eqBands(preset: String): FloatArray? = sp.getString("eq_$preset", null)?.split(',')?.mapNotNull { it.toFloatOrNull() }?.toFloatArray()
+    fun setEqBands(preset: String, v: FloatArray) = sp.edit().putString("eq_$preset", v.joinToString(",")).apply()
+    var updateSnoozeUntil: Long get() = sp.getLong("upd_snooze", 0); set(v) = sp.edit().putLong("upd_snooze", v).apply()
+    var overlayAsked: Boolean get() = b("overlay_asked", false); set(v) = setB("overlay_asked", v)
     var repeat: Int get() = sp.getInt("repeat", 0); set(v) = sp.edit().putInt("repeat", v).apply()
     var lastPlaylists: Set<Long>
         get() = sp.getStringSet("last_pl", emptySet())!!.mapNotNull { it.toLongOrNull() }.toSet()

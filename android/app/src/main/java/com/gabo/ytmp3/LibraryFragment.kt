@@ -60,6 +60,8 @@ class LibraryFragment : Fragment() {
         adapter = Adapter()
         list.adapter = adapter
         root.addView(list, lp(MATCH, 0, 1f))
+        list.clipToPadding = false
+        (activity as? MainActivity)?.onBottomInset { b -> list.setPadding(0, 0, 0, b) }
 
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
