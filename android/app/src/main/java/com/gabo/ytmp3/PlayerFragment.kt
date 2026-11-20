@@ -62,7 +62,7 @@ class PlayerFragment : Fragment() {
         // Caleidoscopio a pantalla completa (canciones sin portada)
         bgKaleido = KaleidoView(c).apply { visibility = View.GONE }
         root.addView(bgKaleido, FrameLayout.LayoutParams(MATCH, MATCH))
-        if (!Prefs2(c).saver) { viz = VizView(c).apply { visibility = View.GONE }; root.addView(viz, FrameLayout.LayoutParams(MATCH, MATCH)) }
+        viz = VizView(c).apply { visibility = View.GONE }; root.addView(viz, FrameLayout.LayoutParams(MATCH, MATCH))
         scrim = View(c).apply {
             visibility = View.GONE
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,

@@ -83,7 +83,7 @@ class HomeFragment : Fragment() {
         // Un solo visualizador detrás de las dos tarjetas; una máscara del color de la página
         // dibuja las esquinas redondeadas y el espacio entre ellas.
         val djBox = FrameLayout(c)
-        djBg = if (Prefs2(c).saver) KaleidoView(c).apply { seed = BRAND_RED.toLong() } else VizView(c).apply { djStyle = true }
+        djBg = VizView(c).apply { djStyle = true }
         djBox.addView(djBg, FrameLayout.LayoutParams(MATCH, MATCH))
         djBox.addView(djRow, FrameLayout.LayoutParams(MATCH, WRAP))
         val pageBg = c.col(R.color.ios_bg)

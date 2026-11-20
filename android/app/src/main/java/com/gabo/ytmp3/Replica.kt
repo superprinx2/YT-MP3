@@ -221,6 +221,12 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
         w.setOnScrollChangeListener { _, _, y, _, oy -> onScroll?.invoke(y, oy) }
         w.webChromeClient = object : android.webkit.WebChromeClient() {
             override fun onProgressChanged(view: WebView, p: Int) { bar.progress = p }
+            // Spotify (y otros) piden "contenido protegido" (DRM Widevine) para su reproductor web:
+            // sin este permiso muestran "Reproductor deshabilitado". Solo se concede eso, nada más.
+            override fun onPermissionRequest(request: android.webkit.PermissionRequest) {
+                val ok = request.resources.filter { it == android.webkit.PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID }
+                if (ok.isNotEmpty()) request.grant(ok.toTypedArray()) else request.deny()
+            }
         }
         frame.addView(w, FrameLayout.LayoutParams(MATCH, MATCH))
         frame.addView(bar, FrameLayout.LayoutParams(MATCH, ctx.dp(3), Gravity.TOP))

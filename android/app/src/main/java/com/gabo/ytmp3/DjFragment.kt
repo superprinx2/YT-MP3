@@ -176,8 +176,7 @@ suspend fun loadSmallBitmap(f: java.io.File?, size: Int = 360): Bitmap? = kotlin
 
 /** Fondo del DJ: visualizador OpenGL, o el caleidoscopio simple en modo ahorro. */
 private fun djBackground(c: Context, mood: Mood?): View =
-    if (Prefs2(c).saver) KaleidoView(c).apply { seed = (mood?.ordinal ?: 7).toLong() + 99; running = true }
-    else VizView(c).apply { hue = mood?.hue; djStyle = true }
+    VizView(c).apply { hue = mood?.hue; djStyle = true }
 
 /** "¿Cómo te sientes hoy?" con burbujas de colores. */
 class MoodFragment : Fragment() {
@@ -329,7 +328,9 @@ class DjFragment : Fragment() {
         faderRow.addView(c.text("A", 12f, 0xB0FFFFFF.toInt(), 2))
         faderRow.addView(xfader, lp(0, c.dp(40), 1f))
         faderRow.addView(c.text("B", 12f, 0xB0FFFFFF.toInt(), 2))
-        col.addView(faderRow, lp(MATCH, WRAP).apply { setMargins(c.dp(22), 0, c.dp(22), c.dp(12)) })
+        faderRow.visibility = View.GONE   // solo el disco: sin barra
+        col.addView(faderRow, lp(MATCH, WRAP))
+        col.addView(View(c), lp(1, c.dp(18)))
         root.addView(col, FrameLayout.LayoutParams(MATCH, MATCH))
 
         loading = LinearLayout(c).apply {

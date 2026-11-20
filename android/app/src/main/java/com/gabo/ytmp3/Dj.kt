@@ -314,9 +314,9 @@ class DjSession(ctx: Context, tracks: List<Track>, val mood: Mood?, private val 
         fun snap(ms: Double) = (grid + Math.round((ms - grid) / bar) * bar).toLong()
         val r = rnd.nextFloat()
         val (tMin, tMax) = when {
-            r < 0.35f -> 30_000L to 50_000L
-            r < 0.80f -> 50_000L to 90_000L
-            else -> 100_000L to 175_000L     // a veces casi completa
+            r < 0.20f -> 50_000L to 75_000L
+            r < 0.70f -> 75_000L to 120_000L
+            else -> 120_000L to 200_000L     // a veces casi completa
         }
         val mem = memory(t.id)
         fun seen(s: Long) = mem.any { abs(it - s) < 4000 }
@@ -329,7 +329,7 @@ class DjSession(ctx: Context, tracks: List<Track>, val mood: Mood?, private val 
                 var end = p.end; var j = i
                 while (end - p.start < tMin && j + 1 < parts.size && (parts[j + 1].type != 'O' || tMax > 100_000)) { j++; end = parts[j].end }
                 if (end - p.start > tMax) end = p.start + tMax
-                if (end - p.start < 20_000) continue
+                if (end - p.start < 40_000) continue
                 var w = when (p.type) { 'C' -> 3f; 'V' -> 1.5f; else -> if (tMax > 100_000) 1f else 0.4f }
                 w += p.energy * 0.15f
                 if (seen(p.start)) w *= 0.05f
@@ -349,13 +349,13 @@ class DjSession(ctx: Context, tracks: List<Track>, val mood: Mood?, private val 
         val total = cands.sumOf { it.third.toDouble() }
         var x = rnd.nextDouble() * total
         val pick = cands.firstOrNull { x -= it.third; x <= 0 } ?: cands.last()
-        var start = snap(pick.first.toDouble()).coerceIn(0, max(0, dur - 25_000))
+        var start = snap(pick.first.toDouble()).coerceIn(0, max(0, dur - 50_000))
         // que dure frases completas (múltiplos de 4 compases)
         val bars = ((pick.second - start) / bar).toInt()
         val phraseBars = if (bars >= 8) bars / 4 * 4 else max(bars, 4)
         var end = (start + phraseBars * bar).toLong()
         end = min(end, dur - 1500)
-        if (end - start < 20_000) { start = max(0, end - 30_000) }
+        if (end - start < 45_000) { start = max(0, end - 60_000) }
         rememberPart(t.id, pick.first)
         return start to end
     }

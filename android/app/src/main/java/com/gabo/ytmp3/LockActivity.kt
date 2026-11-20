@@ -59,7 +59,7 @@ class LockActivity : AppCompatActivity() {
         val root = FrameLayout(c).apply { setBackgroundColor(Color.BLACK) }
         bg = ImageView(c).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
         root.addView(bg, FrameLayout.LayoutParams(MATCH, MATCH))
-        if (Prefs2(c).usage == UsageMode.MAX) {
+        run {
             viz = VizView(c).apply { visibility = View.GONE }
             root.addView(viz, FrameLayout.LayoutParams(MATCH, MATCH))
         }

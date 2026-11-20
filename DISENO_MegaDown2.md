@@ -85,3 +85,11 @@ DJ desde playlist y desde canción).
 - Inicio: las tarjetas del DJ usan el visualizador nuevo.
 - Descargar: "Buscar en <red> o pegar enlace" que se desplaza para leerse completo.
 - Spotify: cada canción baja con su propia portada (no la de la playlist).
+
+## v2.5
+- Visualizador nuevo en toda la app (DJ, ánimo, Inicio, reproductor, bloqueo): túnel 3D de fractales de órbitas
+  (fórmula Hopalong generalizada) que se regeneran sin fin, luces con 6 formas, la música pinta la profundidad
+  (cerca bajos, lejos agudos), estela, bloom, espejos de caleidoscopio y filtros; escenas al azar con los golpes y
+  las mezclas. Técnicas inspiradas en AudiOrbits, código propio. Calidad según el modo de uso.
+- Modo DJ: solo el disco (sin barra) y partes de canción más largas (50 s a 3 min 20 s).
+- Spotify en Descargar: se concede "contenido protegido" (DRM) a la réplica: ya no sale "Reproductor deshabilitado".

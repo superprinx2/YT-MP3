@@ -84,20 +84,23 @@ object AudioData {
 }
 
 /**
- * Visualizador hipnótico (OpenGL): estela que se retroalimenta (zoom + giro + desvanecido),
- * espejos de caleidoscopio, onda y espectro reales, ráfagas con el bajo y 12 efectos que se
- * transforman solos. Inspirado en los visualizadores clásicos, con diseño y código propios.
+ * Visualizador de órbitas (OpenGL): un túnel 3D de fractales de puntos luminosos que vuela con
+ * la música y nunca se repite. Cada "capa" es un fractal de órbitas (fórmula Hopalong de Barry
+ * Martin, 1986, generalizada) con números al azar; al pasar la cámara vuelve al fondo con una
+ * figura nueva. La música pinta la profundidad: las capas cercanas brillan con los bajos y las
+ * lejanas con los agudos. Encima: estela, brillo difuso (bloom), espejos de caleidoscopio y filtros.
+ * Escenas al azar (formas de luz, colores, giro, velocidad, espejos) que cambian con los golpes.
+ * Técnicas inspiradas en AudiOrbits; código propio de DownSong.
  */
 class VizView(ctx: Context) : GLSurfaceView(ctx) {
-    private val renderer = VizRenderer()
-    /** Color base por estado de ánimo (null = arcoíris que va cambiando). */
+    private val renderer = VizRenderer(Prefs2(ctx).usage)
+    /** Color base por estado de ánimo (null = colores libres). */
     var hue: Float? = null
         set(v) { field = v; renderer.baseHue = v }
-    /** Silueta de la canción (Modo DJ) y avance 0..1. */
+    /** (Compatibilidad) silueta y avance de la canción. */
     var envelope: ByteArray = ByteArray(0)
-        set(v) { field = v; renderer.envelope = v }
     var progress: Float = 0f
-        set(v) { field = v; renderer.progress = v }
+    /** Modo DJ: escenas más explosivas y cambios más seguidos. */
     var djStyle: Boolean = false
         set(v) { field = v; renderer.djStyle = v }
     private var fps = 30
@@ -110,9 +113,7 @@ class VizView(ctx: Context) : GLSurfaceView(ctx) {
         preserveEGLContextOnPause = true
         setRenderer(renderer)
         renderMode = RENDERMODE_WHEN_DIRTY
-        val mode = Prefs2(ctx).usage
-        fps = if (mode == UsageMode.MAX) 60 else 30
-        renderer.scale = if (mode == UsageMode.MAX) 0.75f else 0.5f
+        fps = when (Prefs2(ctx).usage) { UsageMode.MAX -> 60; UsageMode.BALANCED -> 45; UsageMode.SAVER -> 30 }
     }
 
     private val tick = object : Choreographer.FrameCallback {
@@ -133,176 +134,352 @@ class VizView(ctx: Context) : GLSurfaceView(ctx) {
     override fun onDetachedFromWindow() { stop(); super.onDetachedFromWindow() }
 }
 
-private class VizRenderer : GLSurfaceView.Renderer {
-    @Volatile var baseHue: Float? = null
-    @Volatile var envelope: ByteArray = ByteArray(0)
-    @Volatile var progress = 0f
-    @Volatile var djStyle = false
-    @Volatile var scale = 0.5f
-    @Volatile var dominant = 0
-    private var frameN = 0
-    private val pix: ByteBuffer = ByteBuffer.allocateDirect(24 * 24 * 4).order(ByteOrder.nativeOrder())
-
-    private var w = 1; private var h = 1; private var fw = 1; private var fh = 1
-    private val fbo = IntArray(2); private val tex = IntArray(2); private var src = 0
-    private var progFeed = 0; private var progShape = 0; private var progShow = 0
-    private lateinit var quad: FloatBuffer
-    private var verts: FloatBuffer = alloc(8192 * 6)
-    private val t0 = SystemClock.uptimeMillis()
-    private var bassAvg = 0.1f; private var bass = 0f; private var level = 0f
-    private var beat = 0f
-    private val rnd = Random(7)
-
-    // 12 efectos: zoom, giro, deformación, decaimiento, emisor, espejos, velocidad de color
-    private data class Preset(val zoom: Float, val rot: Float, val warpMode: Int, val warp: Float, val decay: Float,
-                              val emitter: Int, val segs: Float, val hueSpeed: Float)
-    private val presets = listOf(
-        Preset(1.025f, 0.004f, 1, 0.6f, 0.955f, 1, 8f, 18f),    // flor que gira
-        Preset(1.04f, -0.01f, 0, 0f, 0.94f, 2, 0f, 25f),        // túnel de espectro
-        Preset(0.985f, 0.006f, 2, 1f, 0.96f, 0, 6f, 12f),       // olas espejo
-        Preset(1.02f, 0.02f, 1, 1.2f, 0.95f, 5, 12f, 30f),      // espiral lissajous
-        Preset(1.03f, 0f, 0, 0f, 0.93f, 4, 0f, 40f),            // estrellas que explotan
-        Preset(1.01f, -0.006f, 2, 0.6f, 0.965f, 3, 4f, 15f),    // barras de fuego en cruz
-        Preset(1.05f, 0.012f, 1, 0.3f, 0.92f, 1, 0f, 22f),      // anillos hacia el infinito
-        Preset(0.98f, -0.015f, 1, 0.9f, 0.96f, 2, 10f, 35f),    // mandala que respira
-        Preset(1.015f, 0.003f, 2, 1.4f, 0.97f, 0, 0f, 10f),     // aurora líquida
-        Preset(1.035f, 0.025f, 1, 0.8f, 0.945f, 4, 6f, 50f),    // galaxia caleidoscopio
-        Preset(1.0f, 0.008f, 2, 0.8f, 0.955f, 5, 8f, 20f),      // nudos de luz
-        Preset(1.02f, -0.004f, 0, 0f, 0.95f, 6, 0f, 14f),       // silueta de la canción (DJ)
-    )
-    private var curP = presets[0]; private var nxtP = presets[0]; private var blend = 1f
-    private var presetSince = 0f
-    private var lastDjEvent = AudioLevels.djEvent
-    private var flash = 0f; private var hueKick = 0f; private var rotKick = 0f; private var kickDir = 1f
-    private var lowAvg = 0.1f; private var lowPrev = 0f
-    private var force = false
-
-    fun nextPreset() { force = true }
-
-    /** Efecto nuevo al azar: a veces uno de los clásicos con variaciones, a veces uno inventado. */
-    private fun randomPreset(): Preset {
-        val base = if (rnd.nextFloat() < 0.5f) presets[rnd.nextInt(11)] else null
-        val emitters = if (djStyle) intArrayOf(0, 1, 2, 3, 4, 5, 6, 1, 2, 5) else intArrayOf(0, 1, 2, 3, 4, 5)
-        val sign = if (rnd.nextBoolean()) 1f else -1f
-        return Preset(
-            zoom = base?.zoom?.plus((rnd.nextFloat() - 0.5f) * 0.02f) ?: (0.975f + rnd.nextFloat() * 0.075f),
-            rot = (base?.rot?.let { abs(it) } ?: (0.003f + rnd.nextFloat() * 0.022f)) * sign,
-            warpMode = base?.warpMode ?: rnd.nextInt(3),
-            warp = base?.warp ?: (rnd.nextFloat() * 1.4f),
-            decay = base?.decay ?: (0.93f + rnd.nextFloat() * 0.04f),
-            emitter = if (base != null && rnd.nextFloat() < 0.6f) base.emitter else emitters[rnd.nextInt(emitters.size)],
-            segs = floatArrayOf(0f, 0f, 4f, 6f, 8f, 10f, 12f, 16f)[rnd.nextInt(8)],
-            hueSpeed = 10f + rnd.nextFloat() * 45f)
+/** Generador de fractales de órbitas (en segundo plano, un hilo para todos los visualizadores). */
+private object OrbitGen {
+    val exec: java.util.concurrent.ExecutorService = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread({ android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DISPLAY); r.run() }, "ds-orbits")
     }
 
-    private class Particle(var x: Float, var y: Float, var vx: Float, var vy: Float, var life: Float, var hue: Float)
-    private val parts = ArrayList<Particle>()
+    /** Parámetros de forma de una escena. */
+    class Shape(val aMin: Float, val aMax: Float, val bMin: Float, val bMax: Float, val cMin: Float, val cMax: Float,
+                val dMin: Float, val dMax: Float, val eMin: Float, val eMax: Float, val tunnelIn: Float, val tunnelOut: Float)
+
+    /** Una capa: [subsets] grupos de [points] puntos (x, y en -1..1). */
+    fun level(sh: Shape, subsets: Int, points: Int, rnd: Random): FloatArray {
+        val out = FloatArray(subsets * points * 2)
+        fun r(a: Float, b: Float) = a + rnd.nextFloat() * (b - a)
+        val a = r(sh.aMin, sh.aMax); val b = r(sh.bMin, sh.bMax); val c = r(sh.cMin, sh.cMax)
+        val d = r(sh.dMin, sh.dMax); val e = r(sh.eMin, sh.eMax)
+        val kind = rnd.nextFloat()
+        var xMin = Float.MAX_VALUE; var xMax = -Float.MAX_VALUE; var yMin = Float.MAX_VALUE; var yMax = -Float.MAX_VALUE
+        for (s in 0 until subsets) {
+            // cada grupo arranca en un punto distinto: así se "replica" la figura en el espacio
+            var x = s / 100f * (0.5f - rnd.nextFloat())
+            var y = s / 100f * (0.5f - rnd.nextFloat())
+            for (i in 0 until points) {
+                val q = abs(b * x - c)
+                val z = d + when {
+                    kind < 0.5f -> sqrt(q)
+                    kind < 0.75f -> sqrt(sqrt(q))
+                    else -> ln(2f + sqrt(q))
+                }
+                val x1 = if (x > 0f) y - z else if (x == 0f) y else y + z
+                y = a - x
+                x = x1 + e
+                val k = (s * points + i) * 2
+                out[k] = x; out[k + 1] = y
+                if (x < xMin) xMin = x; if (x > xMax) xMax = x
+                if (y < yMin) yMin = y; if (y > yMax) yMax = y
+            }
+        }
+        val sx = 2f / max(1e-4f, xMax - xMin); val sy = 2f / max(1e-4f, yMax - yMin)
+        val ir = sh.tunnelIn; val or = max(0.01f, sh.tunnelOut)
+        var k = 0
+        while (k < out.size) {
+            var x = (out[k] - xMin) * sx - 1f
+            var y = (out[k + 1] - yMin) * sy - 1f
+            // "túnel": saca los puntos del centro para que la cámara pase sin chocar
+            if (ir > 0f) {
+                val dist = sqrt(x * x + y * y)
+                if (dist < ir && dist > 1e-5f) {
+                    val sc = dist / ir; val outer = sc / or
+                    x = x / sc + x * outer; y = y / sc + y * outer
+                }
+            }
+            out[k] = x; out[k + 1] = y
+            k += 2
+        }
+        return out
+    }
+}
+
+private class VizRenderer(usage: UsageMode) : GLSurfaceView.Renderer {
+    @Volatile var baseHue: Float? = null
+    @Volatile var djStyle = false
+    @Volatile var dominant = 0
+    @Volatile private var force = false
+    fun nextPreset() { force = true }
+
+    // calidad según el modo de uso
+    private val levels = when (usage) { UsageMode.MAX -> 6; UsageMode.BALANCED -> 5; UsageMode.SAVER -> 4 }
+    private val subsets = when (usage) { UsageMode.MAX -> 12; UsageMode.BALANCED -> 10; UsageMode.SAVER -> 8 }
+    private val points = when (usage) { UsageMode.MAX -> 1600; UsageMode.BALANCED -> 1000; UsageMode.SAVER -> 600 }
+    private val scale = when (usage) { UsageMode.MAX -> 0.75f; UsageMode.BALANCED -> 0.6f; UsageMode.SAVER -> 0.45f }
+    private val depth = 2f           // profundidad de cada capa
+    private val near = 0.06f
+
+    private val rnd = Random(System.nanoTime())
+    private var w = 1; private var h = 1; private var fw = 1; private var fh = 1; private var bw = 1; private var bh = 1
+    private var progPts = 0; private var progTrail = 0; private var progBright = 0; private var progBlur = 0; private var progShow = 0
+    private lateinit var quad: FloatBuffer
+    private val vbo = IntArray(6)
+    private val ready = BooleanArray(6)
+    private val z = Array(6) { FloatArray(12) }
+    private val moved = IntArray(6)
+    private val pending = java.util.concurrent.ConcurrentLinkedQueue<Pair<Int, FloatArray>>()
+    private val requested = BooleanArray(6)
+    // FBO: escena, estela (2), brillo (2)
+    private val tex = IntArray(5); private val fbo = IntArray(5)
+    private var trailSrc = 1
+    private var frameN = 0
+    private val pix: ByteBuffer = ByteBuffer.allocateDirect(24 * 24 * 4).order(ByteOrder.nativeOrder())
+    private var last = SystemClock.uptimeMillis()
+    private val t0 = SystemClock.uptimeMillis()
+
+    // audio
+    private var level = 0f; private var bass = 0f; private var bassAvg = 0.1f; private var beat = 0f
+    private var lowAvg = 0.1f; private var lowPrev = 0f
+    private var flash = 0f; private var hueKick = 0f; private var rotKick = 0f; private var speedKick = 0f
+    private var angle = 0f; private var spin = 0f
+
+    /** Una escena: forma de las órbitas, vuelo, luces, colores y filtros. */
+    private class Scene(
+        val shape: OrbitGen.Shape, val spread: Float, val fov: Float, val zoom: Float, val rot: Float,
+        val style: Int, val size: Float, val colorMode: Int, val fade: Float, val hueA: Float, val hueB: Float,
+        val segs: Float, val trail: Float, val bloom: Float, val filter: Int, val audioZoom: Float, val name: String,
+    )
+    private var cur: Scene
+    private var prev: Scene
+    private var blend = 1f
+    private var since = 0f
+    private val hues = FloatArray(12)
+
+    init {
+        cur = makeScene(); prev = cur
+        for (s in 0 until 12) hues[s] = rnd.nextFloat() * 360f
+        for (k in 0 until 6) for (s in 0 until 12) z[k][s] = -(depth * k + s * depth / subsets) - 0.5f
+    }
+
+    private fun r(a: Float, b: Float) = a + rnd.nextFloat() * (b - a)
+
+    /** Escenas inspiradas en los presets clásicos, o del todo al azar. */
+    private fun makeScene(): Scene {
+        val classic = OrbitGen.Shape(-25f, 25f, 0.25f, 1.7f, 5f, 16f, 1f, 9f, 1f, 10f, 0.02f, 0.02f)
+        val hueA = baseHue ?: r(0f, 360f)
+        val hueB = (hueA + r(40f, 200f)) % 360f
+        return when (rnd.nextInt(7)) {
+            0 -> Scene(classic, 1.0f, 70f, 0.9f, 0f, 0, 1.2f, 4, 0.4f, hueA, hueB, 0f, 0.35f, 1.0f, 0, 1.2f, "Espacio")
+            1 -> Scene(classic.copyTunnel(0.03f, 0.14f), 1.1f, 70f, 1.5f, 0.35f, 0, 1.0f, 0, 0f, hueA, hueB, 0f, 0.25f, 0.6f, 0, 1.0f, "Satisfacción")
+            2 -> Scene(classic, 1.0f, 70f, 3.2f, -0.25f, rnd.nextInt(6), 1.0f, 0, 2.5f, hueA, hueB, listOf(4f, 6f, 8f).random(rnd), 0.55f, 0.7f, rnd.nextInt(3), 0.8f, "Trip")
+            3 -> Scene(OrbitGen.Shape(-25f, 25f, 0.25f, 1.7f, 5f, 16f, -9f, 1f, 1f, 10f, 0.01f, 0.01f), 1.6f, 120f, 1.6f, 0f, 2, 0.8f, 4, 0.5f, hueA, hueB, 0f, 0.45f, 0.9f, 0, 1.5f, "Hiperespacio")
+            4 -> Scene(classic, 1.0f, 70f, 0.6f, 0f, 0, 1.3f, 0, 0f, hueA, hueB, 0f, 0.3f, 1.1f, 0, 2.0f, "Ácido")
+            else -> Scene(
+                OrbitGen.Shape(r(-30f, -10f), r(10f, 30f), r(0.1f, 0.5f), r(1f, 2.2f), r(3f, 7f), r(10f, 20f),
+                    if (rnd.nextBoolean()) r(-9f, 0f) else r(0f, 3f), r(4f, 10f), r(0f, 3f), r(6f, 12f), r(0f, 0.05f), r(0.02f, 0.2f)),
+                r(0.8f, 1.6f), r(60f, 125f), r(0.6f, 3f), r(-0.5f, 0.5f), rnd.nextInt(6), r(0.7f, 1.5f), rnd.nextInt(5), r(0f, 2.5f),
+                hueA, hueB, listOf(0f, 0f, 0f, 4f, 6f, 8f, 10f, 12f, 16f).random(rnd), r(0f, 0.7f), r(0.3f, 1.3f),
+                if (rnd.nextFloat() < 0.75f) 0 else 1 + rnd.nextInt(3), r(0.8f, 2f), "Libre")
+        }
+    }
+
+    private fun OrbitGen.Shape.copyTunnel(i: Float, o: Float) = OrbitGen.Shape(aMin, aMax, bMin, bMax, cMin, cMax, dMin, dMax, eMin, eMax, i, o)
+
+    private fun request(k: Int) {
+        if (requested[k]) return
+        requested[k] = true
+        val sh = cur.shape
+        val seed = rnd.nextLong()
+        OrbitGen.exec.execute {
+            val data = OrbitGen.level(sh, subsets, points, Random(seed))
+            pending += k to data
+        }
+    }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         quad = alloc(8).apply { put(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)); position(0) }
-        progFeed = program(VS, FS_FEED)
-        progShape = program(VS_SHAPE, FS_SHAPE)
+        progPts = program(VS_PTS, FS_PTS)
+        progTrail = program(VS, FS_TRAIL)
+        progBright = program(VS, FS_BRIGHT)
+        progBlur = program(VS, FS_BLUR)
         progShow = program(VS, FS_SHOW)
+        GLES20.glGenBuffers(levels, vbo, 0)
+        for (k in 0 until levels) { ready[k] = false; requested[k] = false; request(k) }
+    }
+
+    private fun makeTex(i: Int, tw: Int, th: Int) {
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[i])
+        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, tw, th, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[i])
+        GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, tex[i], 0)
+        GLES20.glClearColor(0f, 0f, 0f, 1f); GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
         w = width; h = height
         fw = max(64, (w * scale).toInt()); fh = max(64, (h * scale).toInt())
-        GLES20.glDeleteTextures(2, tex, 0); GLES20.glDeleteFramebuffers(2, fbo, 0)
-        GLES20.glGenTextures(2, tex, 0); GLES20.glGenFramebuffers(2, fbo, 0)
-        for (i in 0..1) {
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[i])
-            GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, fw, fh, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[i])
-            GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, tex[i], 0)
-            GLES20.glClearColor(0f, 0f, 0f, 1f); GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-        }
+        bw = max(16, fw / 4); bh = max(16, fh / 4)
+        GLES20.glDeleteTextures(5, tex, 0); GLES20.glDeleteFramebuffers(5, fbo, 0)
+        GLES20.glGenTextures(5, tex, 0); GLES20.glGenFramebuffers(5, fbo, 0)
+        makeTex(0, fw, fh); makeTex(1, fw, fh); makeTex(2, fw, fh); makeTex(3, bw, bh); makeTex(4, bw, bh)
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-        curP = if (djStyle) randomPreset() else presets[rnd.nextInt(11)]
-        nxtP = curP
     }
 
     private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
 
     override fun onDrawFrame(gl: GL10?) {
-        val time = (SystemClock.uptimeMillis() - t0) / 1000f
-        val dt = 1f / 40f
-        // sonido (si no suena nada, un vaivén suave para que siga vivo)
+        val now = SystemClock.uptimeMillis()
+        val dt = ((now - last) / 1000f).coerceIn(0.001f, 0.06f); last = now
+        val time = (now - t0) / 1000f
+
+        // capas nuevas listas: subirlas a la tarjeta gráfica
+        while (true) {
+            val (k, data) = pending.poll() ?: break
+            GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vbo[k])
+            val fb = ByteBuffer.allocateDirect(data.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(data).position(0)
+            GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, data.size * 4, fb, GLES20.GL_DYNAMIC_DRAW)
+            ready[k] = true; requested[k] = false
+        }
+
+        // ---------- sonido
         val playing = AudioLevels.level > 0.01f
-        level += ((if (playing) AudioLevels.level else 0.15f + 0.05f * sin(time)) - level) * 0.3f
-        bass += ((if (playing) AudioLevels.bass else 0.12f + 0.08f * sin(time * 2.1f)) - bass) * 0.35f
+        level += ((if (playing) AudioLevels.level else 0.18f + 0.05f * sin(time)) - level) * 0.25f
+        bass += ((if (playing) AudioLevels.bass else 0.12f + 0.06f * sin(time * 1.7f)) - bass) * 0.35f
         bassAvg += (bass - bassAvg) * 0.02f
-        // golpe de bombo: los graves del espectro suben de repente
         val spec = AudioData.spec
         var lowNow = 0f; for (i in 0 until 6) lowNow += spec[i]; lowNow /= 6f
         lowAvg += (lowNow - lowAvg) * 0.05f
         val kick = playing && lowNow > lowAvg * 1.3f && lowNow - lowPrev > 0.05f
         lowPrev = lowNow
         if ((kick || (bass > bassAvg * 1.45f && bass > 0.12f)) && beat < 0.3f) {
-            beat = 1f; onBeat(time)
-            hueKick += 20f + rnd.nextFloat() * 40f
-            rotKick = (if (djStyle) 0.05f else 0.02f) * kickDir
-            if (rnd.nextFloat() < 0.35f) kickDir = -kickDir
+            beat = 1f
+            speedKick = if (djStyle) 2.2f else 1.2f
+            rotKick = (if (rnd.nextBoolean()) 1f else -1f) * (if (djStyle) 0.9f else 0.5f)
+            hueKick += r(15f, 45f)
         }
         beat = max(0f, beat - dt * 2.5f)
-        // bajón fuerte (el "drop") o mezcla del DJ: destello y efecto nuevo
-        if (playing && bass > bassAvg * 2.2f && bassAvg < 0.3f && presetSince > 3f) { flash = 1f; if (djStyle) force = true }
+        speedKick *= 0.9f; rotKick *= 0.92f
+        if (playing && bass > bassAvg * 2.2f && bassAvg < 0.3f && since > 4f) { flash = 1f; if (djStyle) force = true }
         if (AudioLevels.djEvent != lastDjEvent) { lastDjEvent = AudioLevels.djEvent; flash = 1f; force = true }
 
-        // cambio de efecto (al azar en el DJ) con fundido
-        presetSince += dt
-        val every = if (djStyle) 10f else 20f
-        if (blend >= 1f && (force || (presetSince > every && beat > 0.9f) || presetSince > every + 14f)) {
-            nxtP = if (djStyle) randomPreset() else { var n: Preset; do { n = presets[rnd.nextInt(11)] } while (n === curP); n }
-            blend = 0f; presetSince = 0f; force = false
+        // ---------- escenas al azar
+        since += dt
+        val every = if (djStyle) 12f else 24f
+        if (blend >= 1f && (force || (since > every && beat > 0.9f) || since > every + 15f)) {
+            prev = cur; cur = makeScene(); blend = 0f; since = 0f; force = false
+            for (s in 0 until 12) if (cur.colorMode == 3) hues[s] = lerp(cur.hueA, cur.hueB, rnd.nextFloat())
+            // las capas lejanas se rehacen ya con la forma nueva
+            val order = (0 until levels).sortedBy { k -> z[k].take(subsets).maxOrNull() ?: 0f }
+            order.take(levels - 1).forEach { request(it) }
         }
-        if (blend < 1f) { blend = min(1f, blend + dt / (if (djStyle) 1.6f else 2.5f)); if (blend >= 1f) curP = nxtP }
-        val a = curP; val b = nxtP; val k = if (a === b) 1f else blend
-        val punch = if (djStyle) 0.07f else 0.035f
-        val zoom = lerp(a.zoom, b.zoom, k) + beat * punch + flash * 0.04f
-        val rot = lerp(a.rot, b.rot, k) * (1f + level) + rotKick
-        rotKick *= 0.88f
-        val decay = lerp(a.decay, b.decay, k)
-        val segs = if (k < 0.5f) a.segs else b.segs
-        val hueSpeed = lerp(a.hueSpeed, b.hueSpeed, k)
-        val hue = (baseHue?.let { it + 30f * sin(time * 0.3f) } ?: (time * hueSpeed)) + bass * 60f + hueKick
-        flash = max(0f, flash - dt * 1.8f)
+        if (blend < 1f) blend = min(1f, blend + dt / 1.5f)
+        val a = prev; val b = cur; val k = blend
+        val fov = lerp(a.fov, b.fov, k)
+        val focal = 1f / kotlin.math.tan(Math.toRadians(fov / 2.0).toFloat())
+        val spread = lerp(a.spread, b.spread, k)
+        val discrete = if (k < 0.5f) a else b
 
-        val dst = 1 - src
-        // 1) estela: dibujar el cuadro anterior ampliado, girado y desvanecido
+        // ---------- vuelo: la música empuja la cámara y hace girar las órbitas
+        val boost = (level * 1.6f + bass * 0.8f).coerceIn(0f, 2f)
+        val speed = lerp(a.zoom, b.zoom, k) * (0.25f + boost * lerp(a.audioZoom, b.audioZoom, k)) + speedKick
+        spin = lerp(a.rot, b.rot, k) * (0.3f + boost) + rotKick
+        angle += spin * dt
+        if (discrete.colorMode == 0) for (s in 0 until 12) hues[s] = (hues[s] + discrete.fade * 40f * dt) % 360f
+
+        // ---------- 1) órbitas en la escena (luces que se suman)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[0])
+        GLES20.glViewport(0, 0, fw, fh)
+        GLES20.glClearColor(0f, 0f, 0f, 1f); GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        GLES20.glEnable(GLES20.GL_BLEND); GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE)
+        GLES20.glUseProgram(progPts)
+        val aPos = GLES20.glGetAttribLocation(progPts, "pos")
+        GLES20.glEnableVertexAttribArray(aPos)
+        uf(progPts, "uFocal", focal); uf(progPts, "uAspect", fw.toFloat() / fh); uf(progPts, "uViewH", fh.toFloat())
+        uf(progPts, "uSpread", spread); uf(progPts, "uStyle", discrete.style.toFloat())
+        uf(progPts, "uSize", 0.008f * lerp(a.size, b.size, k) * (1f + beat * 0.35f))
+        val total = levels * depth
+        val uZ = GLES20.glGetUniformLocation(progPts, "uZ"); val uRot = GLES20.glGetUniformLocation(progPts, "uRot")
+        val uCol = GLES20.glGetUniformLocation(progPts, "uColor")
+        val rgb = FloatArray(3)
+        val hA = baseHue ?: discrete.hueA
+        val hB = if (baseHue != null) (baseHue!! + 50f) % 360f else discrete.hueB
+        for (lv in 0 until levels) {
+            for (s in 0 until subsets) {
+                z[lv][s] += speed * dt
+                if (z[lv][s] > -near) {
+                    z[lv][s] -= total
+                    if (++moved[lv] >= subsets) { moved[lv] = 0; request(lv) }
+                }
+            }
+            if (!ready[lv]) continue
+            GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vbo[lv])
+            GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 8, 0)
+            for (s in 0 until subsets) {
+                val zz = z[lv][s]
+                val d = -zz
+                // la música pinta la profundidad: cerca = bajos, lejos = agudos
+                val band = ((d / total) * 56f).toInt().coerceIn(0, 63)
+                // los agudos suenan más bajito: se compensan para que el fondo también brille
+                val f = if (playing) (spec[band] * (1f + band / 32f)).coerceAtMost(1.2f) else 0f
+                val lvlF = (f * 1.25f).coerceIn(0f, 1.2f)
+                var hue = when (discrete.colorMode) {
+                    1 -> hA
+                    2 -> lerp(hA, hB, s / max(1f, subsets - 1f))
+                    3 -> hues[s]
+                    4 -> lerp(hA, hB, (f * 1.4f).coerceIn(0f, 1f))
+                    else -> hues[s] + lvlF * 60f
+                } + hueKick
+                hue = ((hue % 360f) + 360f) % 360f
+                val sat = if (playing) (0.55f + lvlF * 0.6f + lvlF * boost * 0.1f).coerceIn(0f, 1f) else 0.85f
+                val light = if (playing) (0.2f + lvlF * 0.5f + boost * 0.08f).coerceIn(0f, 0.72f) else 0.42f
+                hsl(hue, sat, light, rgb)
+                val fog = (1f - d / total).coerceIn(0f, 1f).let { it * it } * (0.6f + 0.4f * min(1f, d / 0.4f))
+                GLES20.glUniform1f(uZ, zz)
+                GLES20.glUniform1f(uRot, angle - 0.785398f + s * 0.0f)
+                GLES20.glUniform4f(uCol, rgb[0], rgb[1], rgb[2], fog * (1f + flash * 0.6f))
+                GLES20.glDrawArrays(GLES20.GL_POINTS, s * points, points)
+            }
+        }
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
+        GLES20.glDisableVertexAttribArray(aPos)
+        GLES20.glDisable(GLES20.GL_BLEND)
+
+        // ---------- 2) estela: lo anterior se queda un poco (rastro de luz)
+        val dst = if (trailSrc == 1) 2 else 1
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[dst])
         GLES20.glViewport(0, 0, fw, fh)
-        GLES20.glDisable(GLES20.GL_BLEND)
-        GLES20.glUseProgram(progFeed)
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE0); GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[src])
-        uf(progFeed, "zoom", zoom); uf(progFeed, "rot", rot); uf(progFeed, "time", time)
-        uf(progFeed, "decay", decay); uf(progFeed, "bass", bass); uf(progFeed, "aspect", fw.toFloat() / fh)
-        uf(progFeed, "warp", lerp(a.warp, b.warp, k) * (0.6f + level + beat * 0.5f)); uf(progFeed, "mode", (if (k < 0.5f) a.warpMode else b.warpMode).toFloat())
-        drawQuad(progFeed)
-
-        // 2) emisores (suma de luz)
-        GLES20.glEnable(GLES20.GL_BLEND); GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE)
-        val ea = if (a === b) 1f else 1f - blend
-        emit(a.emitter, hue, time, ea)
-        if (a !== b) emit(b.emitter, hue + 90f, time, blend)
-        drawParticles(dt)
+        GLES20.glUseProgram(progTrail)
+        bindTex(progTrail, "prev", 0, tex[trailSrc]); bindTex(progTrail, "scene", 1, tex[0])
+        uf(progTrail, "decay", lerp(a.trail, b.trail, k) * (1f - flash * 0.3f))
+        uf(progTrail, "zoom", 1f + 0.01f + beat * 0.02f); uf(progTrail, "rot", spin * 0.01f); uf(progTrail, "aspect", fw.toFloat() / fh)
+        drawQuad(progTrail)
         if (++frameN % 12 == 0) sampleDominant()
+        trailSrc = dst
 
-        // 3) mostrar con espejos de caleidoscopio (late con el bombo)
+        // ---------- 3) brillo difuso (bloom) en pequeño
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[3])
+        GLES20.glViewport(0, 0, bw, bh)
+        GLES20.glUseProgram(progBright); bindTex(progBright, "t", 0, tex[dst]); drawQuad(progBright)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[4])
+        GLES20.glUseProgram(progBlur); bindTex(progBlur, "t", 0, tex[3])
+        GLES20.glUniform2f(GLES20.glGetUniformLocation(progBlur, "dir"), 1f / bw, 0f); drawQuad(progBlur)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[3])
+        bindTex(progBlur, "t", 0, tex[4])
+        GLES20.glUniform2f(GLES20.glGetUniformLocation(progBlur, "dir"), 0f, 1f / bh); drawQuad(progBlur)
+
+        // ---------- 4) a la pantalla: espejos de caleidoscopio, filtro de color, latido
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
         GLES20.glViewport(0, 0, w, h)
-        GLES20.glDisable(GLES20.GL_BLEND)
         GLES20.glUseProgram(progShow)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[dst])
-        uf(progShow, "segs", segs); uf(progShow, "time", time); uf(progShow, "aspect", w.toFloat() / h)
-        uf(progShow, "glow", 0.9f + beat * (if (djStyle) 0.45f else 0.2f) + flash * 0.5f)
+        bindTex(progShow, "t", 0, tex[dst]); bindTex(progShow, "bloom", 1, tex[3])
+        uf(progShow, "segs", discrete.segs); uf(progShow, "time", time); uf(progShow, "aspect", w.toFloat() / h)
+        uf(progShow, "glow", 1f + beat * (if (djStyle) 0.35f else 0.15f) + flash * 0.4f)
+        uf(progShow, "bloomAmt", lerp(a.bloom, b.bloom, k) * (1f + beat * 0.6f + flash))
         uf(progShow, "pulse", beat * (if (djStyle) 1f else 0.5f))
+        uf(progShow, "filt", discrete.filter.toFloat())
         drawQuad(progShow)
-        src = dst
+        flash = max(0f, flash - dt * 1.6f)
+    }
+
+    private var lastDjEvent = AudioLevels.djEvent
+
+    private fun bindTex(p: Int, name: String, unit: Int, t: Int) {
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0 + unit)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, t)
+        GLES20.glUniform1i(GLES20.glGetUniformLocation(p, name), unit)
     }
 
     /** Lee 4 parches pequeños del cuadro y saca el color más vivo que predomina. */
@@ -314,10 +491,10 @@ private class VizRenderer : GLSurfaceView.Renderer {
             pix.clear()
             GLES20.glReadPixels(x, y, 24, 24, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pix)
             for (i in 0 until 24 * 24) {
-                val r = pix.get(i * 4).toInt() and 0xFF; val g = pix.get(i * 4 + 1).toInt() and 0xFF; val b = pix.get(i * 4 + 2).toInt() and 0xFF
-                val mx = maxOf(r, g, b); val mn = minOf(r, g, b)
-                val w = ((mx - mn) / 255.0) * (mx / 255.0) + 0.002   // pesa más lo colorido y brillante
-                sr += r * w; sg += g * w; sb += b * w; sw += w
+                val rr = pix.get(i * 4).toInt() and 0xFF; val gg = pix.get(i * 4 + 1).toInt() and 0xFF; val bb = pix.get(i * 4 + 2).toInt() and 0xFF
+                val mx = maxOf(rr, gg, bb); val mn = minOf(rr, gg, bb)
+                val wgt = ((mx - mn) / 255.0) * (mx / 255.0) + 0.002
+                sr += rr * wgt; sg += gg * wgt; sb += bb * wgt; sw += wgt
             }
         }
         if (sw <= 0.01) return
@@ -327,103 +504,16 @@ private class VizRenderer : GLSurfaceView.Renderer {
         dominant = Color.HSVToColor(hsv)
     }
 
-    private fun onBeat(time: Float) {
-        val n = 26
-        val hue = (baseHue ?: (time * 40f)) + rnd.nextFloat() * 60f
-        repeat(n) {
-            val ang = rnd.nextFloat() * 2 * PI.toFloat()
-            val sp = 0.4f + rnd.nextFloat() * 0.9f
-            parts += Particle(0f, 0f, cos(ang) * sp, sin(ang) * sp, 1f, hue + it * 4f)
+    private fun hsl(hDeg: Float, s: Float, l: Float, out: FloatArray) {
+        val c = (1f - abs(2f * l - 1f)) * s
+        val hp = (hDeg / 60f) % 6f
+        val x = c * (1f - abs(hp % 2f - 1f))
+        val (r1, g1, b1) = when {
+            hp < 1f -> Triple(c, x, 0f); hp < 2f -> Triple(x, c, 0f); hp < 3f -> Triple(0f, c, x)
+            hp < 4f -> Triple(0f, x, c); hp < 5f -> Triple(x, 0f, c); else -> Triple(c, 0f, x)
         }
-        while (parts.size > 400) parts.removeAt(0)
-    }
-
-    private fun emit(kind: Int, hue: Float, time: Float, alpha: Float) {
-        verts.clear()
-        var count = 0
-        val wave = AudioData.wave; val spec = AudioData.spec
-        val asp = fh.toFloat() / fw
-        fun v(x: Float, y: Float, c: Int, al: Float) {
-            verts.put(x).put(y).put(Color.red(c) / 255f).put(Color.green(c) / 255f).put(Color.blue(c) / 255f).put(al * alpha * 0.6f); count++
-        }
-        val col = hsv(hue, 0.85f, 1f); val col2 = hsv(hue + 120f, 0.8f, 1f)
-        when (kind) {
-            0 -> for (i in 0 until 256) {               // onda horizontal
-                val x = -0.9f + 1.8f * i / 255f
-                v(x, wave[i] * 0.6f * (1f + level), if (i % 2 == 0) col else col2, 0.9f)
-            }
-            1, 7 -> for (i in 0..256) {                  // anillo de onda
-                val ang = 2 * PI.toFloat() * i / 256f
-                val r = 0.28f + wave[i % 256] * 0.25f + bass * 0.12f
-                v(cos(ang) * r * asp, sin(ang) * r, if (i % 3 == 0) col2 else col, 0.85f)
-            }
-            2 -> for (i in 0 until 64) {                 // rayos de espectro
-                val ang = 2 * PI.toFloat() * i / 64f + time * 0.2f
-                val r0 = 0.12f; val r1 = r0 + spec[i] * 0.55f
-                val c = hsv(hue + i * 3f, 0.9f, 1f)
-                v(cos(ang) * r0 * asp, sin(ang) * r0, c, 0.9f); v(cos(ang) * r1 * asp, sin(ang) * r1, c, 0.9f)
-            }
-            3 -> for (i in 0 until 64) {                 // barras de fuego
-                val x = -0.95f + 1.9f * i / 63f
-                val hh = spec[i] * 0.9f
-                val c = hsv(hue + i * 2f, 0.9f, 1f)
-                v(x, -0.6f, c, 0.9f); v(x, -0.6f + hh, c, 0.9f)
-                v(x, 0.6f, c, 0.6f); v(x, 0.6f - hh, c, 0.6f)
-            }
-            4 -> {}                                      // solo estrellas (partículas)
-            5 -> for (i in 0 until 255) {                // figura de lissajous
-                v(wave[i] * 0.8f * asp + sin(time + i * 0.05f) * 0.05f, wave[(i + 64) % 256] * 0.8f, if (i % 2 == 0) col else col2, 0.8f)
-            }
-            6 -> {                                       // silueta de la canción con el avance (DJ)
-                val env = envelope
-                if (env.isNotEmpty()) {
-                    val center = (progress * env.size).toInt()
-                    val span = 120
-                    for (j in -span until span) {
-                        val idx = center + j
-                        if (idx !in env.indices) continue
-                        val x = j / span.toFloat()
-                        val amp = (env[idx].toInt() and 0xFF) / 255f * 0.55f
-                        val c = if (j < 0) hsv(hue, 0.7f, 0.8f) else hsv(hue + 140f, 0.9f, 1f)
-                        v(x, -amp, c, 0.35f); v(x, amp, c, 0.35f)
-                    }
-                    v(0f, -0.7f, Color.WHITE, 0.9f); v(0f, 0.7f, Color.WHITE, 0.9f)
-                } else for (i in 0 until 256) v(-0.9f + 1.8f * i / 255f, wave[i] * 0.5f, col, 0.9f)
-            }
-        }
-        if (count == 0) return
-        verts.position(0)
-        GLES20.glUseProgram(progShape)
-        val pos = GLES20.glGetAttribLocation(progShape, "pos"); val c = GLES20.glGetAttribLocation(progShape, "col")
-        verts.position(0); GLES20.glVertexAttribPointer(pos, 2, GLES20.GL_FLOAT, false, 24, verts); GLES20.glEnableVertexAttribArray(pos)
-        verts.position(2); GLES20.glVertexAttribPointer(c, 4, GLES20.GL_FLOAT, false, 24, verts); GLES20.glEnableVertexAttribArray(c)
-        uf(progShape, "psize", 3f)
-        val mode = when (kind) { 2, 3, 6 -> GLES20.GL_LINES; else -> GLES20.GL_LINE_STRIP }
-        GLES20.glLineWidth(if (kind == 6) 3f else 2.5f)
-        GLES20.glDrawArrays(mode, 0, count)
-
-    }
-
-    private fun drawParticles(dt: Float) {
-        if (parts.isEmpty()) return
-        verts.clear()
-        val asp = fh.toFloat() / fw
-        val it = parts.iterator()
-        var n = 0
-        while (it.hasNext()) {
-            val p = it.next()
-            p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.985f; p.vy *= 0.985f; p.life -= dt * 0.6f
-            if (p.life <= 0f || hypot(p.x, p.y) > 1.5f) { it.remove(); continue }
-            val c = hsv(p.hue, 0.6f, 1f)
-            verts.put(p.x * asp).put(p.y).put(Color.red(c) / 255f).put(Color.green(c) / 255f).put(Color.blue(c) / 255f).put(p.life); n++
-        }
-        if (n == 0) return
-        GLES20.glUseProgram(progShape)
-        val pos = GLES20.glGetAttribLocation(progShape, "pos"); val c = GLES20.glGetAttribLocation(progShape, "col")
-        verts.position(0); GLES20.glVertexAttribPointer(pos, 2, GLES20.GL_FLOAT, false, 24, verts); GLES20.glEnableVertexAttribArray(pos)
-        verts.position(2); GLES20.glVertexAttribPointer(c, 4, GLES20.GL_FLOAT, false, 24, verts); GLES20.glEnableVertexAttribArray(c)
-        uf(progShape, "psize", 7f)
-        GLES20.glDrawArrays(GLES20.GL_POINTS, 0, n)
+        val m = l - c / 2f
+        out[0] = r1 + m; out[1] = g1 + m; out[2] = b1 + m
     }
 
     private fun drawQuad(p: Int) {
@@ -431,13 +521,10 @@ private class VizRenderer : GLSurfaceView.Renderer {
         quad.position(0)
         GLES20.glVertexAttribPointer(pos, 2, GLES20.GL_FLOAT, false, 8, quad)
         GLES20.glEnableVertexAttribArray(pos)
-        GLES20.glUniform1i(GLES20.glGetUniformLocation(p, "t"), 0)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
     }
 
     private fun uf(p: Int, n: String, v: Float) = GLES20.glUniform1f(GLES20.glGetUniformLocation(p, n), v)
-
-    private fun hsv(h: Float, s: Float, v: Float): Int = Color.HSVToColor(floatArrayOf(((h % 360f) + 360f) % 360f, s, v))
 
     companion object {
         fun alloc(n: Int): FloatBuffer = ByteBuffer.allocateDirect(n * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
@@ -453,43 +540,81 @@ private class VizRenderer : GLSurfaceView.Renderer {
         const val VS = """
             attribute vec2 pos; varying vec2 v;
             void main(){ v = pos * 0.5 + 0.5; gl_Position = vec4(pos, 0.0, 1.0); }"""
-        const val FS_FEED = """
+
+        // órbitas: perspectiva hacia el fondo del túnel y tamaño de cada luz según la distancia
+        const val VS_PTS = """
+            attribute vec2 pos;
+            uniform float uZ, uRot, uSpread, uFocal, uAspect, uSize, uViewH;
+            void main(){
+                float c = cos(uRot), s = sin(uRot);
+                vec2 p = vec2(pos.x * c - pos.y * s, pos.x * s + pos.y * c) * uSpread;
+                float d = max(-uZ, 0.02);
+                gl_Position = vec4(p.x * uFocal / d / uAspect, p.y * uFocal / d, 0.0, 1.0);
+                gl_PointSize = clamp(uSize * uViewH * uFocal / d, 1.0, 40.0);
+            }"""
+
+        // 6 formas de luz: galaxia, anillo, estrella, cubito, corazón, chispa
+        const val FS_PTS = """
+            precision mediump float;
+            uniform vec4 uColor; uniform float uStyle;
+            void main(){
+                vec2 d = gl_PointCoord * 2.0 - 1.0; float r = length(d); float a;
+                if (uStyle < 0.5) a = exp(-r * r * 4.0);
+                else if (uStyle < 1.5) a = smoothstep(0.45, 0.7, r) * smoothstep(1.0, 0.75, r) * 1.6;
+                else if (uStyle < 2.5) { vec2 q = abs(d); a = max(exp(-q.x * 10.0) * exp(-q.y * 1.6), exp(-q.y * 10.0) * exp(-q.x * 1.6)) + exp(-r * r * 9.0) * 0.6; }
+                else if (uStyle < 3.5) { vec2 q = abs(d); float m = max(q.x, q.y); a = step(m, 0.72) * (0.55 + 0.45 * (1.0 - m)); }
+                else if (uStyle < 4.5) { vec2 q = vec2(d.x, -d.y) * 1.3 + vec2(0.0, 0.15); float x2 = q.x * q.x; float k = x2 + q.y * q.y - 1.0; a = step(k * k * k - x2 * q.y * q.y * q.y, 0.0) * 0.95; }
+                else { vec2 q = abs(d); a = exp(-q.x * 16.0) * exp(-q.y * 0.9) + exp(-q.y * 16.0) * exp(-q.x * 0.9) * 0.7; }
+                if (a < 0.01) discard;
+                gl_FragColor = vec4(uColor.rgb * a * uColor.a, 1.0);
+            }"""
+
+        const val FS_TRAIL = """
+            precision mediump float;
+            varying vec2 v; uniform sampler2D prev; uniform sampler2D scene;
+            uniform float decay, zoom, rot, aspect;
+            void main(){
+                vec2 p = v - 0.5; p.x *= aspect;
+                float c = cos(rot), s = sin(rot);
+                p = vec2(p.x * c - p.y * s, p.x * s + p.y * c) / zoom;
+                p.x /= aspect; p += 0.5;
+                vec3 col = texture2D(prev, p).rgb * decay + texture2D(scene, v).rgb;
+                gl_FragColor = vec4(min(col, vec3(1.0)), 1.0);
+            }"""
+
+        const val FS_BRIGHT = """
             precision mediump float;
             varying vec2 v; uniform sampler2D t;
-            uniform float zoom, rot, time, decay, bass, warp, mode, aspect;
-            vec3 hue(vec3 c, float a){ vec3 k = vec3(0.57735); float ca = cos(a);
-                return c * ca + cross(k, c) * sin(a) + k * dot(k, c) * (1.0 - ca); }
+            void main(){ vec3 c = texture2D(t, v).rgb; gl_FragColor = vec4(max(c - 0.25, 0.0) * 1.5, 1.0); }"""
+
+        const val FS_BLUR = """
+            precision mediump float;
+            varying vec2 v; uniform sampler2D t; uniform vec2 dir;
             void main(){
-                vec2 p = v - 0.5; p.x *= aspect;
-                float r = length(p); float a = atan(p.y, p.x);
-                if (mode > 0.5 && mode < 1.5) a += warp * 0.06 * (0.6 - r);
-                if (mode > 1.5) r += warp * 0.004 * sin(r * 30.0 - time * 3.0);
-                a += rot; r /= zoom;
-                vec2 q = vec2(cos(a), sin(a)) * r; q.x /= aspect; q += 0.5;
-                vec3 c = max(texture2D(t, q).rgb * decay - vec3(0.006), vec3(0.0));
-                c = hue(c, 0.015 + bass * 0.04);
+                vec3 c = texture2D(t, v).rgb * 0.227;
+                c += (texture2D(t, v + dir * 1.38).rgb + texture2D(t, v - dir * 1.38).rgb) * 0.316;
+                c += (texture2D(t, v + dir * 3.23).rgb + texture2D(t, v - dir * 3.23).rgb) * 0.070;
                 gl_FragColor = vec4(c, 1.0);
             }"""
-        const val VS_SHAPE = """
-            attribute vec2 pos; attribute vec4 col; varying vec4 vc; uniform float psize;
-            void main(){ vc = col; gl_PointSize = psize; gl_Position = vec4(pos, 0.0, 1.0); }"""
-        const val FS_SHAPE = """
-            precision mediump float; varying vec4 vc;
-            void main(){ gl_FragColor = vc; }"""
+
         const val FS_SHOW = """
             precision mediump float;
-            varying vec2 v; uniform sampler2D t; uniform float segs, time, aspect, glow, pulse;
+            varying vec2 v; uniform sampler2D t; uniform sampler2D bloom;
+            uniform float segs, time, aspect, glow, bloomAmt, pulse, filt;
             void main(){
                 vec2 p = v - 0.5; p.x *= aspect;
-                p *= (1.0 - pulse * 0.08);
+                p *= (1.0 - pulse * 0.07);
                 if (segs > 0.5) {
-                    float a = atan(p.y, p.x) + time * 0.05 + pulse * 0.12; float r = length(p);
+                    float a = atan(p.y, p.x) + time * 0.04 + pulse * 0.1; float r = length(p);
                     float s = 6.2831853 / segs; a = mod(a, s); a = abs(a - s * 0.5);
                     p = vec2(cos(a), sin(a)) * r;
                 }
-                p.x /= aspect;
-                vec3 c = texture2D(t, p + 0.5).rgb * glow;
-                float vig = smoothstep(1.1, 0.25, length(v - 0.5) * 1.4);
+                p.x /= aspect; vec2 uv = p + 0.5;
+                vec3 c = texture2D(t, uv).rgb * glow + texture2D(bloom, uv).rgb * bloomAmt;
+                if (filt > 0.5 && filt < 1.5) c = c.gbr;
+                else if (filt > 1.5 && filt < 2.5) c = floor(c * 5.0) / 5.0;
+                else if (filt > 2.5) { float l = dot(c, vec3(0.3, 0.59, 0.11)); c = mix(vec3(0.1, 0.0, 0.25), vec3(1.0, 0.45, 0.9), l) * min(1.0, l * 3.0); }
+                float vig = smoothstep(1.15, 0.3, length(v - 0.5) * 1.4);
                 gl_FragColor = vec4(c * vig, 1.0);
             }"""
     }
