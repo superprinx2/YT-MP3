@@ -217,7 +217,7 @@ class SettingsActivity : AppCompatActivity() {
         val fxVal = TextView(this).apply { textSize = 15f; setTextColor(color(R.color.ios_secondary)); text = "${(prefs2.djFxVolume * 100).toInt()} %" }
         cd.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(14f), dp(12f), dp(14f), 0)
-            addView(TextView(this@SettingsActivity).apply { text = "Volumen de los efectos DJ"; textSize = 16f; setTextColor(color(R.color.ios_label)) },
+            addView(TextView(this@SettingsActivity).apply { text = "Creatividad de las mezclas"; textSize = 16f; setTextColor(color(R.color.ios_label)) },
                 LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             addView(fxVal)
         })
@@ -226,11 +226,11 @@ class SettingsActivity : AppCompatActivity() {
             setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(s: android.widget.SeekBar, p: Int, u: Boolean) { prefs2.djFxVolume = p / 100f; fxVal.text = "$p %" }
                 override fun onStartTrackingTouch(s: android.widget.SeekBar) {}
-                override fun onStopTrackingTouch(s: android.widget.SeekBar) { s.haptic(); DjFx.play(this@SettingsActivity, prefs2.djFxVolume) }
+                override fun onStopTrackingTouch(s: android.widget.SeekBar) { s.haptic() }
             })
         })
         content.addView(cd)
-        footer("Suena un efecto de mezcla (barrido, scratch, bocina…) cada vez que el DJ cambia de canción.")
+        footer("Bajo: mezclas largas y suaves con ecualizador. Alto: más loops, ecos y cortes en el golpe. Sin sonidos agregados: todo sale de tus canciones.")
 
         header("Volumen")
         val c2 = card()
@@ -665,6 +665,11 @@ class SettingsActivity : AppCompatActivity() {
         content.addView(card)
         footer("Usa yt-dlp y FFmpeg. Fuente Inter © Rasmus Andersson (SIL OFL). " +
             "Descarga solo contenido que tengas derecho a guardar.")
+        header("Ayúdanos a mejorar")
+        val c2 = card()
+        c2.addView(row("🩺", "Enviar informe de cortes", "", position = Pos.SINGLE) { BlackBox.share(this) })
+        content.addView(c2)
+        footer("Si la música se corta o se detiene sola, envía este informe: dice cuándo y por qué pasó (sin datos personales).")
     }
 
     // ------------------------------------------------------------------ piezas

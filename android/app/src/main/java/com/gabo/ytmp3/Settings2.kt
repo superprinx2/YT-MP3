@@ -44,13 +44,17 @@ class Prefs2(ctx: Context) {
     val saver get() = usage == UsageMode.SAVER
     var lockScreen: Boolean get() = b("lock_own", true); set(v) = setB("lock_own", v)
     var skipSilence: Boolean get() = b("skip_sil", true); set(v) = setB("skip_sil", v)
-    var djFxVolume: Float get() = sp.getFloat("dj_fx", 0.8f); set(v) = sp.edit().putFloat("dj_fx", v).apply()
+    var djFxVolume: Float get() = sp.getFloat("dj_fx", 0.6f); set(v) = sp.edit().putFloat("dj_fx", v).apply()
     var eqOn: Boolean get() = b("eq_on", true); set(v) = setB("eq_on", v)
     var eqPreset: String get() = sp.getString("eq_preset", "Normal") ?: "Normal"; set(v) = sp.edit().putString("eq_preset", v).apply()
     fun eqBands(preset: String): FloatArray? = sp.getString("eq_$preset", null)?.split(',')?.mapNotNull { it.toFloatOrNull() }?.toFloatArray()
     fun setEqBands(preset: String, v: FloatArray) = sp.edit().putString("eq_$preset", v.joinToString(",")).apply()
     var updateSnoozeUntil: Long get() = sp.getLong("upd_snooze", 0); set(v) = sp.edit().putLong("upd_snooze", v).apply()
     var overlayAsked: Boolean get() = b("overlay_asked", false); set(v) = setB("overlay_asked", v)
+    var djBatteryAsked: Boolean get() = b("dj_batt", false); set(v) = setB("dj_batt", v)
+    /** Guardar las descargas también en una carpeta del celular. */
+    var saveLocal: Boolean get() = b("save_local", false); set(v) = setB("save_local", v)
+    var saveLocalPath: String get() = sp.getString("save_local_path", "Music/DownSong/") ?: "Music/DownSong/"; set(v) = sp.edit().putString("save_local_path", v).apply()
     var repeat: Int get() = sp.getInt("repeat", 0); set(v) = sp.edit().putInt("repeat", v).apply()
     var lastPlaylists: Set<Long>
         get() = sp.getStringSet("last_pl", emptySet())!!.mapNotNull { it.toLongOrNull() }.toSet()

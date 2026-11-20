@@ -53,18 +53,20 @@ class DownloadService : Service() {
         private const val EXTRA_FORMAT = "format"
         private const val EXTRA_QUALITY = "quality"
         private const val EXTRA_PLAYLISTS = "playlists"
+        private const val EXTRA_LOCAL = "local_path"
         const val EXTRA_OPEN_VERIFY = "open_verify"
 
         @Volatile private var cancelRequested = false
         @Volatile private var verifyPaused = false
         private val pids = ConcurrentHashMap.newKeySet<String>()
 
-        fun start(ctx: Context, format: Format, quality: Int, playlists: LongArray) {
+        fun start(ctx: Context, format: Format, quality: Int, playlists: LongArray, localPath: String? = null) {
             val i = Intent(ctx, DownloadService::class.java)
                 .setAction(ACTION_START)
                 .putExtra(EXTRA_FORMAT, format.name)
                 .putExtra(EXTRA_QUALITY, quality)
                 .putExtra(EXTRA_PLAYLISTS, playlists)
+                .putExtra(EXTRA_LOCAL, localPath)
             ContextCompat.startForegroundService(ctx, i)
         }
 
@@ -140,6 +142,7 @@ class DownloadService : Service() {
         val format = Format.valueOf(intent.getStringExtra(EXTRA_FORMAT)!!)
         val quality = intent.getIntExtra(EXTRA_QUALITY, 0)
         val targets = intent.getLongArrayExtra(EXTRA_PLAYLISTS)?.toList().orEmpty()
+        localPath = intent.getStringExtra(EXTRA_LOCAL)
 
         val jobs = DownloadState.items.filter { it.checked }
         if (jobs.isEmpty()) { stopSelf(); return START_NOT_STICKY }
@@ -364,12 +367,80 @@ class DownloadService : Service() {
 
     private enum class Result { OK, FAILED, BOT, CANCELLED }
 
+    /** Carpeta del celular donde guardar también (null = solo en la biblioteca de la app). */
+    @Volatile private var localPath: String? = null
+
+    private fun fileName(title: String) = title.replace(Regex("[\\\\/:*?\"<>|]"), " ").replace(Regex("\\s+"), " ").trim().take(90).ifEmpty { "Cancion" }
+
+    /** Copia el MP3 a la carpeta elegida (visible en otras apps). Devuelve su content:// o ruta. */
+    private fun exportAudio(src: File, title: String, artist: String, rel: String): String? = runCatching {
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            val col = android.provider.MediaStore.Audio.Media.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            val cv = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Audio.Media.DISPLAY_NAME, fileName(title) + ".mp3")
+                put(android.provider.MediaStore.Audio.Media.MIME_TYPE, "audio/mpeg")
+                put(android.provider.MediaStore.Audio.Media.RELATIVE_PATH, rel)
+                put(android.provider.MediaStore.Audio.Media.TITLE, title)
+                if (artist.isNotBlank()) put(android.provider.MediaStore.Audio.Media.ARTIST, artist)
+                put(android.provider.MediaStore.Audio.Media.IS_MUSIC, 1)
+                put(android.provider.MediaStore.Audio.Media.IS_PENDING, 1)
+            }
+            val uri = runCatching { contentResolver.insert(col, cv) }.getOrNull() ?: run {
+                // carpetas fuera de "Música": se usa Música/<nombre>
+                cv.put(android.provider.MediaStore.Audio.Media.RELATIVE_PATH, "Music/" + rel.trimEnd('/').substringAfterLast('/') + "/")
+                contentResolver.insert(col, cv)
+            } ?: return@runCatching null
+            contentResolver.openOutputStream(uri)?.use { o -> src.inputStream().use { it.copyTo(o) } }
+            cv.clear(); cv.put(android.provider.MediaStore.Audio.Media.IS_PENDING, 0)
+            contentResolver.update(uri, cv, null, null)
+            uri.toString()
+        } else {
+            val dir = File(android.os.Environment.getExternalStorageDirectory(), rel).apply { mkdirs() }
+            val dst = File(dir, fileName(title) + ".mp3")
+            src.copyTo(dst, overwrite = true)
+            android.media.MediaScannerConnection.scanFile(this, arrayOf(dst.absolutePath), null, null)
+            dst.absolutePath
+        }
+    }.onFailure { android.util.Log.w("DSDownload", "exportAudio", it) }.getOrNull()
+
+    /** El MP4 va a Películas/<carpeta> (Android no deja videos en Música). */
+    private fun exportVideo(src: File, title: String, rel: String) {
+        runCatching {
+            val folder = rel.trimEnd('/').substringAfterLast('/')
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                val col = android.provider.MediaStore.Video.Media.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                val cv = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.Video.Media.DISPLAY_NAME, fileName(title) + ".mp4")
+                    put(android.provider.MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                    put(android.provider.MediaStore.Video.Media.RELATIVE_PATH, "Movies/$folder/")
+                    put(android.provider.MediaStore.Video.Media.IS_PENDING, 1)
+                }
+                val uri = contentResolver.insert(col, cv) ?: return@runCatching
+                contentResolver.openOutputStream(uri)?.use { o -> src.inputStream().use { it.copyTo(o) } }
+                cv.clear(); cv.put(android.provider.MediaStore.Video.Media.IS_PENDING, 0)
+                contentResolver.update(uri, cv, null, null)
+            } else {
+                val dir = File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MOVIES), folder).apply { mkdirs() }
+                val dst = File(dir, fileName(title) + ".mp4"); src.copyTo(dst, overwrite = true)
+                android.media.MediaScannerConnection.scanFile(this, arrayOf(dst.absolutePath), null, null)
+            }
+        }.onFailure { android.util.Log.w("DSDownload", "exportVideo", it) }
+    }
+
     private fun downloadOne(item: VideoItem, format: Format, quality: Int, targets: List<Long>): Result {
         // ¿Ya está en la biblioteca? Solo se agrega a las playlists (sin volver a bajarlo).
         val key = "${item.platform.name.lowercase()}:${item.id}"
         val wantVideo = format == Format.MP4 && item.platform != Platform.SPOTIFY
         val known = runBlocking { Library.dao(this@DownloadService).byKey(key) }
         if (known != null && (!wantVideo || known.hasVideo)) {
+            val rel = localPath
+            if (rel != null && known.localUri == null && known.audioPath != null && File(known.audioPath).exists()) {
+                exportAudio(File(known.audioPath), known.title, known.artist, rel)?.let { where ->
+                    val upd = if (where.startsWith("content://")) known.copy(localUri = where) else known.copy(audioPath = where)
+                    runBlocking { Library.dao(this@DownloadService).updateTrack(upd) }
+                    if (where.startsWith("content://") || where != known.audioPath) runCatching { File(known.audioPath).delete() }
+                }
+            }
             runBlocking { Library.addToPlaylists(this@DownloadService, listOf(known.id), targets) }
             item.savedAs = "${known.title} (ya estaba)"
             return Result.OK
@@ -586,11 +657,22 @@ class DownloadService : Service() {
         }.getOrDefault(0L)
         bytesSaved.addAndGet((audio?.length() ?: 0) + (video?.length() ?: 0))
         val title = item.title.ifBlank { (audio ?: video)?.nameWithoutExtension ?: "Canción" }
+        // Guardar también en la carpeta del celular: el MP3 se mueve allí (sin ocupar el doble)
+        var audioPath = audio?.absolutePath
+        var localUri: String? = null
+        val audioBytes = audio?.length() ?: 0
+        localPath?.let { rel ->
+            if (audio != null) exportAudio(audio, title, item.uploader.orEmpty(), rel)?.let { where ->
+                if (where.startsWith("content://")) { localUri = where; audioPath = null } else audioPath = where
+                audio.delete()
+            }
+            if (video != null) exportVideo(video, title, rel)
+        }
         runBlocking {
             val id = Library.upsert(this@DownloadService, Track(key = key, title = title,
                 artist = item.uploader.orEmpty(), durationMs = durMs,
-                audioPath = audio?.absolutePath, videoPath = video?.absolutePath, coverPath = cover?.absolutePath,
-                audioBytes = audio?.length() ?: 0, videoBytes = video?.length() ?: 0))
+                audioPath = audioPath, localUri = localUri, videoPath = video?.absolutePath, coverPath = cover?.absolutePath,
+                audioBytes = audioBytes, videoBytes = video?.length() ?: 0))
             Library.addToPlaylists(this@DownloadService, listOf(id), targets)
         }
         return title

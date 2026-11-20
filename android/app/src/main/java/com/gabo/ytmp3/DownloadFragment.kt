@@ -43,6 +43,28 @@ class DownloadFragment : Fragment(), BackAware {
     private var showingResults = false
     private var homeLoaded = false
     private var previewJob: kotlinx.coroutines.Job? = null
+    /** Búsqueda de YouTube que se está mostrando (null = inicio). */
+    private var ytQuery: String? = null
+    private var ytFilter = 0
+    /** La lista viene de una búsqueda o del inicio (no de un enlace de playlist). */
+    private var fromSearch = false
+    /** El enlace vino de la réplica web: se descarga sin salir de esa red. */
+    private var fromWeb = false
+    private lateinit var backBtn: android.widget.ImageView
+    private lateinit var logoBadge: android.widget.ImageView
+    private lateinit var filterBtn: android.widget.ImageView
+
+    private val voice = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        val said = r.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull() ?: return@registerForActivityResult
+        h.urlInput.setText(said); analyze()
+    }
+    private var onFolderPicked: ((String) -> Unit)? = null
+    private val folderPick = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        val path = r.data?.getStringExtra(ImportActivity.EXTRA_PATH) ?: return@registerForActivityResult
+        Prefs2(ctx).saveLocalPath = path; Prefs2(ctx).saveLocal = true
+        onFolderPicked?.invoke(path)
+    }
+    private val storagePerm = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
 
     private lateinit var b: ActivityMainBinding
@@ -238,12 +260,24 @@ class DownloadFragment : Fragment(), BackAware {
         }
         if (animate) tabs[p]?.bounce()
         heroView?.setPalette(p.palette)
-        h.urlInput.hint = when (p) {
-            Platform.YOUTUBE -> "Busca canciones o pega un enlace"
-            Platform.TIKTOK -> "Pega el enlace del TikTok"
-            Platform.INSTAGRAM -> "Pega el enlace del reel o publicación"
-            Platform.FACEBOOK -> "Pega el enlace del video o reel de Facebook"
-            Platform.SPOTIFY -> "Pega el enlace de la playlist, álbum o canción"
+        h.urlInput.hint = "Buscar en ${p.label}"
+        if (::logoBadge.isInitialized) {
+            logoBadge.setBackgroundResource(when (p) {
+                Platform.YOUTUBE -> R.drawable.bg_tab_youtube; Platform.SPOTIFY -> R.drawable.bg_tab_spotify
+                Platform.TIKTOK -> R.drawable.bg_tab_tiktok; Platform.INSTAGRAM -> R.drawable.bg_tab_instagram
+                Platform.FACEBOOK -> R.drawable.bg_tab_facebook
+            })
+            logoBadge.setImageResource(when (p) {
+                Platform.YOUTUBE -> R.drawable.ic_tab_play; Platform.SPOTIFY -> R.drawable.ic_tab_waves
+                Platform.TIKTOK -> R.drawable.ic_tab_note; Platform.INSTAGRAM -> R.drawable.ic_tab_camera
+                Platform.FACEBOOK -> R.drawable.ic_tab_video
+            })
+            filterBtn.visibility = if (p == Platform.YOUTUBE) View.VISIBLE else View.GONE
+        }
+        // Al volver a YouTube no mostrar lo que se bajó de otra red
+        if (p == Platform.YOUTUBE && !DownloadState.running && DownloadState.items.any { it.platform != Platform.YOUTUBE }) {
+            DownloadState.items.clear(); homeLoaded = false; ytQuery = null
+            if (::adapter.isInitialized) adapter.notifyDataSetChanged()
         }
         if (DownloadState.items.isEmpty() && !analyzing) {
             h.infoText.visibility = View.VISIBLE
@@ -277,15 +311,53 @@ class DownloadFragment : Fragment(), BackAware {
         h.hero.visibility = View.GONE
         val column = b.list.parent as android.widget.LinearLayout
         (h.platformBar.parent as android.view.ViewGroup).removeView(h.platformBar)
-        val top = android.widget.LinearLayout(ctx).apply {
+        val label = ctx.col(R.color.ios_label)
+        val fieldBg = ctx.col(R.color.ios_card)
+        // Fila 1: un solo buscador, con la apariencia del de YouTube
+        val searchRow = android.widget.LinearLayout(ctx).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(ctx.dp(12), ctx.dp(6), ctx.dp(6), ctx.dp(4))
+            setPadding(ctx.dp(6), ctx.dp(8), ctx.dp(4), ctx.dp(6))
         }
-        top.addView(h.platformBar, lp(0, ctx.dp(64), 1f))
-        top.addView(ctx.icon(R.drawable.ic_person, 46, ctx.col(R.color.ios_label), 10).apply {
-            contentDescription = "Iniciar sesión"
-            setOnClickListener { it.haptic(); login() }
+        backBtn = ctx.icon(R.drawable.ic_back, 40, label, 8).apply {
+            contentDescription = "Atrás"; visibility = View.GONE
+            setOnClickListener { it.haptic(); goBack() }
+        }
+        searchRow.addView(backBtn)
+        logoBadge = android.widget.ImageView(ctx).apply {
+            setPadding(ctx.dp(7), ctx.dp(7), ctx.dp(7), ctx.dp(7))
+            setOnClickListener { it.haptic(); it.bounce(); goHome() }
+        }
+        searchRow.addView(logoBadge, lp(ctx.dp(38), ctx.dp(30)).apply { marginStart = ctx.dp(6); marginEnd = ctx.dp(8) })
+        val pillBox = android.widget.LinearLayout(ctx).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
+            background = roundRect(fieldBg, ctx.dp(22).toFloat()); setPadding(ctx.dp(16), 0, ctx.dp(4), 0)
+        }
+        (h.urlInput.parent as? android.view.ViewGroup)?.let { old ->
+            old.removeView(h.urlInput); old.removeView(h.btnClear); old.visibility = View.GONE
+        }
+        h.urlInput.textSize = 16f
+        pillBox.addView(h.urlInput, lp(0, ctx.dp(44), 1f))
+        pillBox.addView(h.btnClear, lp(ctx.dp(34), ctx.dp(34)))
+        filterBtn = ctx.icon(R.drawable.ic_tune, 40, label, 9).apply {
+            contentDescription = "Filtros de búsqueda"
+            setOnClickListener { it.haptic(); chooseFilter() }
+        }
+        pillBox.addView(filterBtn)
+        searchRow.addView(pillBox, lp(0, ctx.dp(44), 1f))
+        searchRow.addView(ctx.icon(R.drawable.ic_mic, 44, label, 10).apply {
+            contentDescription = "Buscar por voz"
+            background = oval(fieldBg)
+            setOnClickListener { it.haptic(); listen() }
+        }, lp(ctx.dp(44), ctx.dp(44)).apply { marginStart = ctx.dp(8) })
+        searchRow.addView(ctx.icon(R.drawable.ic_dots_v, 40, label, 8).apply {
+            contentDescription = "Más opciones"
+            setOnClickListener { it.haptic(); moreMenu() }
         })
+        // Fila 2: las redes
+        val top = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.VERTICAL }
+        top.addView(searchRow, lp(MATCH, WRAP))
+        h.platformBar.background = null
+        top.addView(h.platformBar, lp(MATCH, ctx.dp(60)).apply { setMargins(ctx.dp(8), 0, ctx.dp(8), ctx.dp(2)) })
         column.addView(top, 0)
 
         // Escenario: la lista o la web ocupan todo; el recuadro (buscador, formato, calidad) flota encima
@@ -295,8 +367,10 @@ class DownloadFragment : Fragment(), BackAware {
         column.addView(stage, listIdx, lp(MATCH, 0, 1f))
         stage.addView(b.list, android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
         web = WebReplica(ctx) { _, url ->
-            h.urlInput.setText(url); showingResults = true; updateMode(); analyze()
+            // Se descarga sin salir de la red: la hoja de guardar aparece encima
+            fromWeb = true; analyze(url)
         }
+        web.onNav = { updateBack() }
         web.hideField()
         web.view.visibility = View.GONE
         stage.addView(web.view, android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
@@ -366,6 +440,14 @@ class DownloadFragment : Fragment(), BackAware {
 
     private fun setOff(v: Float) {
         if (!::panelBox.isInitialized) return
+        if (webVisible) {
+            // En las redes la página ocupa todo: el formato se elige en la hoja de guardar
+            panelBox.visibility = View.GONE; pill.visibility = View.GONE
+            web.view.translationY = 0f
+            (web.view.layoutParams as android.widget.FrameLayout.LayoutParams).let { if (it.bottomMargin != 0) { it.bottomMargin = 0; web.view.requestLayout() } }
+            return
+        }
+        if (panelBox.visibility != View.VISIBLE) panelBox.visibility = View.VISIBLE
         off = v.coerceIn(0f, panelH.toFloat())
         panelBox.translationY = -off
         web.view.translationY = panelH - off
@@ -413,6 +495,56 @@ class DownloadFragment : Fragment(), BackAware {
         refreshBottomBar()
         setOff(0f)
         if (!isWebPlatform && DownloadState.items.isEmpty() && !homeLoaded && !analyzing && !DownloadState.running) loadHome()
+        updateBack()
+    }
+
+    /** La flecha de atrás aparece solo cuando hay a dónde volver. */
+    private fun updateBack() {
+        if (!::backBtn.isInitialized) return
+        val can = (webVisible && web.canGoBack()) || (isWebPlatform && showingResults) || (!isWebPlatform && ytQuery != null)
+        backBtn.visibility = if (can) View.VISIBLE else View.GONE
+    }
+
+    private fun goBack() { if (!onBack() && webVisible) web.goHome(); updateBack() }
+
+    private fun goHome() {
+        if (isWebPlatform) { showingResults = false; updateMode(); web.goHome() }
+        else if (!DownloadState.running) { ytQuery = null; h.urlInput.setText(""); loadHome() }
+    }
+
+    private fun listen() {
+        val i = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "es")
+            .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "¿Qué quieres escuchar?")
+        try { voice.launch(i) } catch (e: Exception) { toast("Tu celular no tiene búsqueda por voz") }
+    }
+
+    private val filters = listOf("Todo", "Canciones", "Videos", "Mixes largos (+20 min)")
+
+    private fun chooseFilter() {
+        ActionSheet.show(ctx, "Buscar en YouTube", filters, selected = ytFilter) { i ->
+            ytFilter = i
+            val q = h.urlInput.text?.toString()?.trim().orEmpty()
+            if (q.length >= 2 && Util.extractUrl(q) == null) search(q)
+        }
+    }
+
+    private fun moreMenu() {
+        val p = prefs.platform
+        val opts = listOf("Pegar enlace copiado", "Iniciar sesión en ${p.label}", "Ir al inicio de ${p.label}", "Ajustes de descargas")
+        ActionSheet.show(ctx, "Opciones", opts) { i ->
+            when (i) {
+                0 -> {
+                    val clip = ctx.getSystemService(ClipboardManager::class.java).primaryClip
+                    val url = Util.extractUrl(clip?.takeIf { c -> c.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString())
+                    if (url == null) toast("No hay ningún enlace copiado") else { h.urlInput.setText(url); analyze() }
+                }
+                1 -> login()
+                2 -> goHome()
+                3 -> startActivity(Intent(ctx, SettingsActivity::class.java))
+            }
+        }
     }
 
     private fun login() {
@@ -424,6 +556,9 @@ class DownloadFragment : Fragment(), BackAware {
     override fun onBack(): Boolean {
         if (webVisible && web.back()) return true
         if (isWebPlatform && showingResults) { showingResults = false; updateMode(); return true }
+        if (!isWebPlatform && ytQuery != null && !DownloadState.running && !analyzing) {
+            ytQuery = null; h.urlInput.setText(""); loadHome(); updateBack(); return true
+        }
         return false
     }
 
@@ -467,8 +602,12 @@ class DownloadFragment : Fragment(), BackAware {
                 }
                 val trending = "ytsearch40:música éxitos ${java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)}"
                 var fellBack = false
+                val enc = Uri.encode(q ?: "")
                 val json = withContext(Dispatchers.IO) {
                     when {
+                        q != null && ytFilter == 1 -> try { run("https://music.youtube.com/search?q=$enc#songs") } catch (e: Exception) { run("ytsearch40:$q audio") }
+                        q != null && ytFilter == 2 -> run("https://www.youtube.com/results?search_query=$enc&sp=EgIQAQ%3D%3D")
+                        q != null && ytFilter == 3 -> run("https://www.youtube.com/results?search_query=$enc&sp=EgIYAg%3D%3D")
                         q != null -> run("ytsearch40:$q")
                         feed != null -> try { run(feed) } catch (e: Exception) { fellBack = true; run(trending) }
                         else -> run(trending)
@@ -481,6 +620,7 @@ class DownloadFragment : Fragment(), BackAware {
                     list = withContext(Dispatchers.Default) { Util.parseInfo(again, Platform.YOUTUBE).third }
                 }
                 list.forEach { it.checked = false }
+                ytQuery = q; fromSearch = true
                 DownloadState.items.clear(); DownloadState.items.addAll(list)
                 DownloadState.listTitle = q ?: "Para ti"; DownloadState.isPlaylist = true
                 DownloadState.finishedMessage = null; DownloadState.totalCount = 0
@@ -497,6 +637,7 @@ class DownloadFragment : Fragment(), BackAware {
                 analyzing = false
                 h.analyzeSpinner.visibility = View.GONE
                 render()
+                updateBack()
             }
         }
     }
@@ -593,13 +734,14 @@ class DownloadFragment : Fragment(), BackAware {
     }
 
     /** Hoja "Guardar en playlist". [confirm] = al tocar Descargar (luego empieza la descarga). */
-    private fun pickTargets(confirm: Boolean) {
+    private fun pickTargets(confirm: Boolean, title: String? = null) {
         val n = DownloadState.items.count { it.checked }.coerceAtLeast(1)
-        val suggested = if (DownloadState.isPlaylist) DownloadState.listTitle else null
+        val suggested = if (DownloadState.isPlaylist && !fromSearch) DownloadState.listTitle else null
         PlaylistPicker.show(ctx,
-            title = if (confirm) "Se ${if (n == 1) "descargará" else "descargarán"} en la playlist…" else "Guardar en playlist",
+            title = title ?: if (confirm) "Se ${if (n == 1) "descargará" else "descargarán"} en la playlist…" else "Guardar en playlist",
             preselected = targets, suggestedNew = suggested,
-            okLabel = if (confirm) "Descargar" else "Listo") { ids, names ->
+            okLabel = if (confirm) "Descargar" else "Listo",
+            extra = downloadOptions(confirm)) { ids, names ->
             targets = ids; targetNames = names
             Prefs2(ctx).lastPlaylists = ids
             showFolder()
@@ -607,10 +749,78 @@ class DownloadFragment : Fragment(), BackAware {
         }
     }
 
+    /** Arriba de la hoja: formato (MP3/MP4) y "guardar también en el celular". */
+    private fun downloadOptions(confirm: Boolean): View {
+        val label = ctx.col(R.color.ios_label); val sec = ctx.col(R.color.ios_secondary)
+        val p2 = Prefs2(ctx)
+        val box = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.VERTICAL; setPadding(ctx.dp(16), 0, ctx.dp(16), ctx.dp(8)) }
+        if (confirm) {
+            val seg = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.HORIZONTAL; background = roundRect(0x22888888, ctx.dp(12).toFloat()); setPadding(ctx.dp(3), ctx.dp(3), ctx.dp(3), ctx.dp(3)) }
+            val sp = DownloadState.items.firstOrNull()?.platform == Platform.SPOTIFY
+            val opts = listOf(Format.MP3 to "🎵  Audio MP3", Format.MP4 to "🎬  Video MP4")
+            val views = ArrayList<android.widget.TextView>()
+            fun paint() = views.forEachIndexed { i, v ->
+                val on = opts[i].first == prefs.format
+                v.background = if (on) roundRect(BRAND_RED, ctx.dp(10).toFloat()) else null
+                v.setTextColor(if (on) android.graphics.Color.WHITE else label)
+                v.alpha = if (sp && opts[i].first == Format.MP4) 0.35f else 1f
+            }
+            opts.forEach { (f, t) ->
+                val v = ctx.text(t, 15f, label, 1).apply {
+                    gravity = android.view.Gravity.CENTER; minHeight = ctx.dp(40)
+                    setOnClickListener {
+                        if (sp && f == Format.MP4) { toast("De Spotify se descarga solo el audio (MP3)"); return@setOnClickListener }
+                        it.haptic(); setFormat(f); paint()
+                    }
+                }
+                views += v; seg.addView(v, lp(0, WRAP, 1f))
+            }
+            paint()
+            box.addView(seg, lp(MATCH, WRAP).apply { bottomMargin = ctx.dp(10) })
+        }
+        // Guardar también en una carpeta del celular
+        val row = android.widget.LinearLayout(ctx).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
+            background = roundRect(0x22888888, ctx.dp(12).toFloat()); setPadding(ctx.dp(14), ctx.dp(10), ctx.dp(10), ctx.dp(10))
+        }
+        row.addView(ctx.text("📁", 22f, label), lp(WRAP, WRAP).apply { marginEnd = ctx.dp(10) })
+        val texts = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.VERTICAL }
+        texts.addView(ctx.text("Guardar también en el celular", 15f, label, 1))
+        val where = ctx.text("", 13f, sec)
+        texts.addView(where)
+        row.addView(texts, lp(0, WRAP, 1f))
+        val sw = androidx.appcompat.widget.SwitchCompat(ctx).apply {
+            setThumbResource(R.drawable.ios_switch_thumb); setTrackResource(R.drawable.ios_switch_track)
+            thumbTintList = null; trackTintList = null; showText = false; isChecked = p2.saveLocal
+        }
+        row.addView(sw)
+        fun paintWhere() {
+            where.text = if (sw.isChecked) "En ${ImportActivity.pretty(p2.saveLocalPath)}  ›  cambiar" else "Para verla también en otras apps"
+            where.setTextColor(if (sw.isChecked) BRAND_RED else sec)
+        }
+        paintWhere()
+        fun needPerm(): Boolean {
+            if (Build.VERSION.SDK_INT >= 29) return false
+            if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) return false
+            storagePerm.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE); return true
+        }
+        sw.setOnCheckedChangeListener { v, on -> v.haptic(); p2.saveLocal = on; if (on) needPerm(); paintWhere() }
+        val pick = View.OnClickListener { v ->
+            v.haptic()
+            onFolderPicked = { sw.isChecked = true; paintWhere() }
+            folderPick.launch(ImportActivity.pickFolder(ctx))
+        }
+        texts.setOnClickListener(pick)
+        row.setOnClickListener(pick)
+        box.addView(row, lp(MATCH, WRAP))
+        return box
+    }
+
     // ------------------------------------------------------------------ búsqueda (video o playlist)
-    private fun analyze() {
-        if (analyzing || DownloadState.running) return
-        val raw = h.urlInput.text?.toString()?.trim().orEmpty()
+    private fun analyze(direct: String? = null) {
+        if (analyzing || DownloadState.running) { if (direct != null) toast("Espera a que termine la descarga actual"); return }
+        if (direct == null) fromWeb = false
+        val raw = direct ?: h.urlInput.text?.toString()?.trim().orEmpty()
         val url = Util.extractUrl(raw)
         if (url == null && raw.length >= 2) {
             ctx.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(h.urlInput.windowToken, 0)
@@ -666,6 +876,7 @@ class DownloadFragment : Fragment(), BackAware {
                 val (title, isPlaylist, list) = spotifyResult ?: withContext(Dispatchers.Default) { Util.parseInfo(json, platform) }
                 DownloadState.items.clear()
                 DownloadState.items.addAll(list)
+                fromSearch = false
                 DownloadState.listTitle = title
                 DownloadState.isPlaylist = isPlaylist
                 DownloadState.finishedMessage = null
@@ -681,7 +892,11 @@ class DownloadFragment : Fragment(), BackAware {
                 h.infoText.visibility = if (isPlaylist) View.VISIBLE else View.GONE
                 h.listTitle.text = if (isPlaylist) "${list.size} ${noun()}" else noun(1)
                 adapter.notifyDataSetChanged()
-                b.downloadFrame.postDelayed({ b.downloadFrame.bounce() }, 150)
+                if (fromWeb) {
+                    // desde TikTok, Instagram, Facebook o Spotify: todo marcado y la hoja de guardar encima
+                    list.forEach { it.checked = true }
+                    pickTargets(confirm = true, title = if (isPlaylist) "«$title» · ${list.size} ${noun()}" else list.first().title)
+                } else b.downloadFrame.postDelayed({ b.downloadFrame.bounce() }, 150)
             } catch (e: Throwable) {
                 val login = platform != Platform.YOUTUBE && Util.needsLogin(e.message)
                 if (login && platform == Platform.INSTAGRAM) { instagramAskedLogin = true; showLoginCard() }
@@ -747,7 +962,8 @@ class DownloadFragment : Fragment(), BackAware {
 
     private fun launchService() {
         val q = if (prefs.format == Format.MP3) prefs.qualityMp3 else prefs.qualityMp4
-        DownloadService.start(ctx, prefs.format, q, targets.toLongArray())
+        val p2 = Prefs2(ctx)
+        DownloadService.start(ctx, prefs.format, q, targets.toLongArray(), if (p2.saveLocal) p2.saveLocalPath else null)
     }
 
     private fun confirmCancel() {

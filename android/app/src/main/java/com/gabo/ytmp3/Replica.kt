@@ -227,9 +227,14 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
         frame.addView(pill, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = ctx.dp(96) })
     }
 
+    /** Avisa cuando cambia la página (para mostrar u ocultar la flecha de atrás). */
+    var onNav: (() -> Unit)? = null
+    fun canGoBack() = web?.canGoBack() == true
+
     private fun check(url: String?) {
         val p = platform ?: return
         if (url != null) lastUrl[p] = url
+        onNav?.invoke()
         val ok = downloadable(p, url)
         if (ok && pill.visibility != View.VISIBLE) { pill.visibility = View.VISIBLE; pill.bounce() }
         else if (!ok) pill.visibility = View.GONE

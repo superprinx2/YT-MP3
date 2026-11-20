@@ -56,6 +56,11 @@ data class Track(
     val tags: String? = null,
     val env: String? = null,
     val gaps: String? = null,
+    // Análisis v2: tonalidad (rueda Camelot), primer tiempo fuerte y partes de la canción
+    val keyCam: String? = null,
+    val beatMs: Long? = null,
+    val sections: String? = null,
+    @ColumnInfo(defaultValue = "0") val anaVer: Int = 0,
 ) {
     val isLocal get() = localUri != null
     val hasVideo get() = videoPath != null && File(videoPath).exists()
@@ -134,8 +139,10 @@ interface LibDao {
     @Query("SELECT trackId, COUNT(*) AS n FROM plays WHERE at >= :since GROUP BY trackId ORDER BY n DESC LIMIT :limit") suspend fun topSince(since: Long, limit: Int): List<TopRow>
     @Query("SELECT COALESCE(SUM(t.durationMs), 0) FROM plays p JOIN tracks t ON t.id = p.trackId WHERE p.at >= :since") suspend fun msSince(since: Long): Long
     @Query("SELECT COUNT(*) FROM plays WHERE at >= :since") fun playsSince(since: Long): Flow<Int>
-    @Query("SELECT * FROM tracks WHERE analyzed = 0 ORDER BY lastPlayed DESC, addedAt DESC LIMIT 10") suspend fun needAnalysis(): List<Track>
-    @Query("SELECT COUNT(*) FROM tracks WHERE analyzed = 0") suspend fun pendingAnalysis(): Int
+    @Query("SELECT * FROM tracks WHERE analyzed = 0 OR (analyzed = 1 AND anaVer < 2) ORDER BY analyzed ASC, lastPlayed DESC, addedAt DESC LIMIT 10") suspend fun needAnalysis(): List<Track>
+    @Query("SELECT COUNT(*) FROM tracks WHERE analyzed = 0 OR (analyzed = 1 AND anaVer < 2)") suspend fun pendingAnalysis(): Int
+    @Query("SELECT localUri FROM tracks WHERE localUri IS NOT NULL") suspend fun localUris(): List<String>
+    @Query("SELECT id FROM tracks WHERE localUri = :u LIMIT 1") suspend fun localTrackId(u: String): Long?
     @Query("SELECT * FROM mood_scores WHERE trackId IN (:ids)") suspend fun moodScores(ids: List<Long>): List<MoodScore>
     @Query("SELECT * FROM mood_scores WHERE trackId = :tid AND mood = :mood") suspend fun moodScore(tid: Long, mood: String): MoodScore?
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putMoodScore(m: MoodScore)
@@ -154,7 +161,7 @@ interface LibDao {
     @Query("SELECT COALESCE(SUM(videoBytes), 0) FROM tracks") suspend fun totalVideo(): Long
 }
 
-@Database(entities = [Track::class, Playlist::class, PlaylistTrack::class, Play::class, MoodScore::class], version = 3, exportSchema = false)
+@Database(entities = [Track::class, Playlist::class, PlaylistTrack::class, Play::class, MoodScore::class], version = 4, exportSchema = false)
 abstract class LibDb : RoomDatabase() {
     abstract fun dao(): LibDao
 }
@@ -178,11 +185,18 @@ private val M2_3 = object : androidx.room.migration.Migration(2, 3) {
     }
 }
 
+private val M3_4 = object : androidx.room.migration.Migration(3, 4) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        for (c in listOf("keyCam TEXT", "beatMs INTEGER", "sections TEXT")) db.execSQL("ALTER TABLE tracks ADD COLUMN $c")
+        db.execSQL("ALTER TABLE tracks ADD COLUMN anaVer INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
 object Library {
     @Volatile private var db: LibDb? = null
 
     fun dao(ctx: Context): LibDao = (db ?: synchronized(this) {
-        db ?: Room.databaseBuilder(ctx.applicationContext, LibDb::class.java, "library.db").addMigrations(M1_2, M2_3).build().also { db = it }
+        db ?: Room.databaseBuilder(ctx.applicationContext, LibDb::class.java, "library.db").addMigrations(M1_2, M2_3, M3_4).build().also { db = it }
     }).dao()
 
     fun dir(ctx: Context, sub: String) = File(ctx.filesDir, "library/$sub").apply { mkdirs() }
@@ -244,7 +258,9 @@ object Library {
 
     // ------------------------------------------------------------------ música del celular
     data class LocalSong(val id: Long, val uri: Uri, val title: String, val artist: String,
-                         val durationMs: Long, val folder: String, val size: Long, val albumId: Long)
+                         val durationMs: Long, val folder: String, val size: Long, val albumId: Long,
+                         /** Carpeta relativa al almacenamiento ("Music/Cumbia/"), o "" si está en otra memoria. */
+                         val relPath: String = "")
 
     fun scanDevice(ctx: Context): List<LocalSong> {
         val out = ArrayList<LocalSong>()
@@ -260,8 +276,10 @@ object Library {
                     val data = c.getString(4) ?: ""
                     val folder = File(data).parentFile?.name ?: "Música"
                     val artist = c.getString(2)?.takeIf { it != "<unknown>" } ?: ""
+                    val root = android.os.Environment.getExternalStorageDirectory().absolutePath.trimEnd('/') + "/"
+                    val rel = File(data).parent?.let { d -> if (d.startsWith(root)) d.removePrefix(root).trimEnd('/') + "/" else "" } ?: ""
                     out += LocalSong(id, ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id),
-                        c.getString(1) ?: "Canción", artist, c.getLong(3), folder, c.getLong(5), c.getLong(6))
+                        c.getString(1) ?: "Canción", artist, c.getLong(3), folder, c.getLong(5), c.getLong(6), rel)
                 }
             }
         }
@@ -272,7 +290,10 @@ object Library {
     suspend fun importLocal(ctx: Context, songs: List<LocalSong>): List<Long> {
         val ids = ArrayList<Long>()
         val covers = dir(ctx, "covers")
+        // Las descargas guardadas en el celular ya están en la biblioteca: no duplicarlas
+        val known = dao(ctx).localUris().toHashSet()
         for (s in songs) {
+            if (s.uri.toString() in known) { dao(ctx).localTrackId(s.uri.toString())?.let { ids += it }; continue }
             val cover = File(covers, "local_${s.id}.jpg")
             if (!cover.exists()) runCatching {
                 val bmp = if (android.os.Build.VERSION.SDK_INT >= 29)

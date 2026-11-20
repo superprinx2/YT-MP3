@@ -19,8 +19,8 @@ android {
         applicationId = "com.gabo.ytmp3"
         minSdk = 26
         targetSdk = 34
-        versionCode = 12
-        versionName = "2.2"
+        versionCode = 13
+        versionName = "2.3"
     }
 
     signingConfigs {
@@ -61,9 +61,11 @@ android {
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { viewBinding = true }
     androidResources { noCompress += "tflite" }
+    testOptions { unitTests.isReturnDefaultValues = true }
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
     val ytdl = "0.18.1"
     implementation("io.github.junkfood02.youtubedl-android:library:$ytdl")
     implementation("io.github.junkfood02.youtubedl-android:ffmpeg:$ytdl")

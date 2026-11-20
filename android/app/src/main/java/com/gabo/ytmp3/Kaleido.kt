@@ -24,6 +24,8 @@ import kotlin.math.sin
 object AudioLevels {
     @Volatile var level = 0f   // 0..1 volumen general
     @Volatile var bass = 0f    // 0..1 graves
+    /** Sube en cada mezcla del DJ (el visualizador cambia de efecto con ella). */
+    @Volatile var djEvent = 0
 }
 
 /**

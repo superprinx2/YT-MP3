@@ -42,8 +42,18 @@ import java.io.File
 /** Agregar música del celular: carpetas, canciones y artistas, al estilo de la app. */
 class ImportActivity : AppCompatActivity() {
     companion object {
+        const val EXTRA_PATH = "path"
+        const val DEFAULT_PATH = "Music/DownSong/"
         fun intent(c: Context, playlistId: Long?) = Intent(c, ImportActivity::class.java).putExtra("pl", playlistId ?: -1L)
+        /** Elegir una carpeta del celular para guardar las descargas. */
+        fun pickFolder(c: Context) = Intent(c, ImportActivity::class.java).putExtra("pick", true)
+        /** "Music/Cumbia/" → "Música › Cumbia". */
+        fun pretty(path: String): String = path.trim('/').split('/').joinToString(" › ") {
+            when (it) { "Music" -> "Música"; "Download" -> "Descargas"; "Movies" -> "Películas"; else -> it }
+        }
     }
+
+    private val picking get() = intent.getBooleanExtra("pick", false)
 
     private val plId get() = intent.getLongExtra("pl", -1L).takeIf { it >= 0 }
     private var songs: List<Library.LocalSong> = emptyList()
@@ -62,7 +72,7 @@ class ImportActivity : AppCompatActivity() {
     private var plName = "tu biblioteca"
 
     private sealed class Item {
-        class Folder(val name: String, val songs: List<Library.LocalSong>) : Item()
+        class Folder(val name: String, val songs: List<Library.LocalSong>, val path: String? = null, val isNew: Boolean = false) : Item()
         class Song(val s: Library.LocalSong) : Item()
         class Artist(val name: String, val count: Int) : Item()
     }
@@ -84,8 +94,8 @@ class ImportActivity : AppCompatActivity() {
         val top = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(8), dp(6), dp(16), 0) }
         top.addView(text("✕", 22f, Color.WHITE, 2).apply { gravity = Gravity.CENTER; setOnClickListener { finish() } }, lp(dp(48), dp(48)))
         val tt = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
-        tt.addView(text("Agregar música", 22f, Color.WHITE, 2))
-        val sub = text("del celular", 13f, 0xBBFFFFFF.toInt())
+        tt.addView(text(if (picking) "Guardar descargas en…" else "Agregar música", 22f, Color.WHITE, 2))
+        val sub = text(if (picking) "Elige una carpeta del celular" else "del celular", 13f, 0xBBFFFFFF.toInt())
         tt.addView(sub)
         top.addView(tt, lp(0, WRAP, 1f))
         col.addView(top)
@@ -110,6 +120,7 @@ class ImportActivity : AppCompatActivity() {
             }.also { tabRow.addView(it, lp(WRAP, WRAP).apply { marginEnd = dp(8) }) }
         }
         col.addView(tabRow)
+        if (picking) tabRow.visibility = View.GONE
         crumb = text("", 15f, BRAND_RED, 1).apply {
             setPadding(dp(18), dp(6), dp(18), dp(6)); visibility = View.GONE
             setOnClickListener { it.haptic(); folder = null; artist = null; rebuild() }
@@ -139,6 +150,7 @@ class ImportActivity : AppCompatActivity() {
         }
         bar.addView(addBtn, lp(0, WRAP, 1f))
         root.addView(bar, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
+        if (picking) bar.visibility = View.GONE
         setContentView(root)
 
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, ins ->
@@ -153,7 +165,7 @@ class ImportActivity : AppCompatActivity() {
                 already = dao.tracksOfNow(id).mapNotNull { it.key.removePrefix("local:").takeIf { k -> it.key.startsWith("local:") }?.toLongOrNull() }.toSet()
                 dao.tracksOfNow(id).firstOrNull()?.let { t -> bg.load(Covers.fileFor(c, t)) }
             }
-            sub.text = "a $plName"
+            if (!picking) sub.text = "a $plName"
             songs = withContext(Dispatchers.IO) { Library.scanDevice(c) }
             if (songs.isEmpty()) Toast.makeText(c, "No encontramos música en el celular", Toast.LENGTH_LONG).show()
             rebuild()
@@ -171,6 +183,13 @@ class ImportActivity : AppCompatActivity() {
         crumb.visibility = if (folder != null || artist != null) View.VISIBLE else View.GONE
         crumb.text = if (folder != null) "‹ Carpetas  ·  $folder" else if (artist != null) "‹ Artistas  ·  $artist" else ""
         items = when {
+            picking -> {
+                val withPath = songs.filter { it.relPath.isNotEmpty() && matches(it) }
+                listOf(Item.Folder("Nueva carpeta", emptyList(), null, isNew = true),
+                    Item.Folder("DownSong", withPath.filter { it.relPath == DEFAULT_PATH }, DEFAULT_PATH)) +
+                    withPath.filter { it.relPath != DEFAULT_PATH }.groupBy { it.relPath }.toList()
+                        .sortedByDescending { it.second.size }.map { (path, l) -> Item.Folder(l.first().folder, l, path) }
+            }
             folder != null || artist != null || tab == 1 -> visibleSongs().map { Item.Song(it) }
             tab == 0 -> songs.filter { matches(it) }.groupBy { it.folder }.toList().sortedByDescending { it.second.size }.map { Item.Folder(it.first, it.second) }
             else -> songs.filter { matches(it) }.groupBy { it.artist.ifEmpty { "Desconocido" } }.toList().sortedByDescending { it.second.size }.map { Item.Artist(it.first, it.second.size) }
@@ -215,6 +234,12 @@ class ImportActivity : AppCompatActivity() {
         val id = plId
         if (id != null) go(setOf(id))
         else PlaylistPicker.show(this, "¿En qué playlist?", emptySet(), folder ?: "Mi música", "Agregar") { ids, _ -> go(ids) }
+    }
+
+    private fun choose(path: String) {
+        setResult(RESULT_OK, Intent().putExtra(EXTRA_PATH, path))
+        Toast.makeText(this, "Se guardará en ${pretty(path)}", Toast.LENGTH_SHORT).show()
+        finish()
     }
 
     private fun thumb(iv: ImageView, s: Library.LocalSong) {
@@ -283,10 +308,25 @@ class ImportActivity : AppCompatActivity() {
                         val iv = mosaic.getChildAt(i) as ImageView
                         it.songs.getOrNull(i)?.let { s -> thumb(iv, s) } ?: iv.setImageBitmap(KaleidoRenderer.bitmap(it.name.hashCode().toLong() + i, 96))
                     }
-                    v.findViewWithTag<TextView>("name").text = it.name
-                    v.findViewWithTag<TextView>("count").text = "${it.songs.size} canciones"
+                    v.findViewWithTag<TextView>("name").text = if (it.isNew) "＋ Nueva carpeta" else it.name
+                    v.findViewWithTag<TextView>("count").text = when {
+                        it.isNew -> "Crear una carpeta en Música"
+                        picking -> pretty(it.path ?: "") + " · ${it.songs.size}"
+                        else -> "${it.songs.size} canciones"
+                    }
+                    v.findViewWithTag<View>("all").visibility = if (picking) View.GONE else View.VISIBLE
                     v.findViewWithTag<View>("all").setOnClickListener { b -> b.haptic(true); b.bounce(); add(it.songs.filter { s -> s.id !in already }) }
-                    v.setOnClickListener { x -> x.haptic(); folder = it.name; rebuild() }
+                    v.setOnClickListener { x ->
+                        x.haptic()
+                        when {
+                            it.isNew -> PlaylistPicker.askName(this@ImportActivity, "Nueva carpeta en Música", "", 40) { n ->
+                                val clean = n.replace(Regex("[\\\\/:*?\"<>|]"), "").trim()
+                                if (clean.isNotEmpty()) choose("Music/$clean/")
+                            }
+                            picking -> choose(it.path ?: DEFAULT_PATH)
+                            else -> { folder = it.name; rebuild() }
+                        }
+                    }
                 }
                 is Item.Song -> {
                     val s = it.s

@@ -22,11 +22,11 @@ object PlaylistPicker {
 
     fun show(
         a: AppCompatActivity, title: String, preselected: Set<Long>, suggestedNew: String?,
-        okLabel: String = "Listo", onOk: (Set<Long>, String) -> Unit,
+        okLabel: String = "Listo", extra: View? = null, onOk: (Set<Long>, String) -> Unit,
     ) {
         a.lifecycleScope.launch {
             val all = Library.dao(a).playlists()
-            build(a, title, all, preselected, suggestedNew, okLabel, onOk)
+            build(a, title, all, preselected, suggestedNew, okLabel, extra, onOk)
         }
     }
 
@@ -34,7 +34,7 @@ object PlaylistPicker {
 
     private fun build(
         a: AppCompatActivity, title: String, all: List<Playlist>, pre: Set<Long>, suggested: String?,
-        okLabel: String, onOk: (Set<Long>, String) -> Unit,
+        okLabel: String, extra: View?, onOk: (Set<Long>, String) -> Unit,
     ) {
         val d = Dialog(a)
         val label = a.col(R.color.ios_label); val sec = a.col(R.color.ios_secondary)
@@ -55,8 +55,9 @@ object PlaylistPicker {
             setBackgroundResource(R.drawable.bg_card); clipToOutline = true
             setPadding(0, a.dp(16), 0, a.dp(6))
         }
-        card.addView(a.text(title, 18f, label, 2).apply { gravity = Gravity.CENTER; setPadding(a.dp(16), 0, a.dp(16), a.dp(4)) })
+        card.addView(a.text(title, 18f, label, 2, 2).apply { gravity = Gravity.CENTER; setPadding(a.dp(16), 0, a.dp(16), a.dp(4)) })
         card.addView(a.text("Puedes marcar varias playlists", 13f, sec).apply { gravity = Gravity.CENTER; setPadding(0, 0, 0, a.dp(10)) })
+        extra?.let { (it.parent as? ViewGroup)?.removeView(it); card.addView(it, lp(MATCH, WRAP)) }
         val list = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
         val scroll = ScrollView(a).apply { addView(list) }
         val ok = a.text(okLabel, 18f, Color.WHITE, 2).apply {
@@ -128,7 +129,7 @@ object PlaylistPicker {
             addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND); setDimAmount(0.4f)
         }
         scroll.layoutParams = scroll.layoutParams.apply {
-            height = minOf(a.resources.displayMetrics.heightPixels / 2, a.dp(56) * (choices.size + 1))
+            height = minOf(a.resources.displayMetrics.heightPixels / (if (extra != null) 3 else 2), a.dp(56) * (choices.size + 1))
         }
         d.show()
     }

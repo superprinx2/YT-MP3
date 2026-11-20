@@ -58,3 +58,20 @@ agregar música, ecualizador con perfiles, aleatorio que prioriza lo menos escuc
 estadísticas del mes, modos Máximo/Equilibrado/Ahorro, saltar silencios, visualizador OpenGL, Modo DJ
 (análisis BPM/coro/pausas, 11 efectos, Saltar animado, 12 estados de ánimo, IA YAMNet + diccionario + aprendizaje,
 DJ desde playlist y desde canción).
+
+## v2.3
+- **Modo DJ infinito:** usa toda la playlist; cada canción se divide en partes (intro, versos, coros, final) y cada vez
+  suena una parte distinta (memoria por canción). Duración variable (30 s a casi completa), nunca termina.
+- **Mezclas de DJ en vivo (sin sonidos agregados):** consola por plato con ecualizador de 3 bandas (cruce Linkwitz-Riley),
+  la que entra llega sin bajos y con voces bajas, cambio de bajos en el compás; barrido de filtro; eco a tempo con cola sin
+  graves; loop que crece (1 compás → ½ tiempo) hasta el drop; corte en el golpe solo si sube la energía; frenado (raro).
+  Reglas: mezclas largas solo si tono (Camelot) y velocidad combinan; si no, eco o corte. Fraseo de 2/4/8 compases según
+  género, pulso que mantiene alineados los golpes, olas de energía. "Creatividad de las mezclas" en Ajustes.
+- **Análisis en segundo plano** (hilo de prioridad baja): se prepara la playlist que suena; el DJ arranca al instante y suma
+  canciones en vivo. Ahorro: solo con el cargador.
+- **Arreglos de cortes:** foco de audio propio, rescate si un archivo termina o falla, el corte nunca pasa del final real,
+  servicio que no se reabre solo (notificación pegada), "caja negra" en Ajustes → Acerca de.
+- **Disco B:** vinilo DownSong (ondas rojas del logo) con la portada de la playlist; salta con los bajos.
+- **Visualizador del DJ:** efectos al azar y reacción fuerte al bombo, destellos en los drops y en cada mezcla.
+- **Descargar:** buscador único estilo YouTube (filtros, voz, menú), flecha atrás, descargas de TikTok/IG/FB/Spotify sin
+  salir de la red (hoja encima con formato), y "Guardar también en el celular" eligiendo la carpeta con la pantalla de carpetas.

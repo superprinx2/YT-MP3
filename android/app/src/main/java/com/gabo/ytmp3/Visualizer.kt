@@ -12,6 +12,7 @@ import java.nio.FloatBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.ln
@@ -164,12 +165,30 @@ private class VizRenderer : GLSurfaceView.Renderer {
         Preset(1.0f, 0.008f, 2, 0.8f, 0.955f, 5, 8f, 20f),      // nudos de luz
         Preset(1.02f, -0.004f, 0, 0f, 0.95f, 6, 0f, 14f),       // silueta de la canción (DJ)
     )
-    private var cur = 0; private var nxt = 0; private var blend = 1f
-    private val djSeq = intArrayOf(11, 0, 11, 3, 11, 9, 11, 7, 11, 2)
-    private var djIdx = 0
+    private var curP = presets[0]; private var nxtP = presets[0]; private var blend = 1f
     private var presetSince = 0f
+    private var lastDjEvent = AudioLevels.djEvent
+    private var flash = 0f; private var hueKick = 0f; private var rotKick = 0f; private var kickDir = 1f
+    private var lowAvg = 0.1f; private var lowPrev = 0f
+    private var force = false
 
-    fun nextPreset() { presetSince = 999f }
+    fun nextPreset() { force = true }
+
+    /** Efecto nuevo al azar: a veces uno de los clásicos con variaciones, a veces uno inventado. */
+    private fun randomPreset(): Preset {
+        val base = if (rnd.nextFloat() < 0.5f) presets[rnd.nextInt(11)] else null
+        val emitters = if (djStyle) intArrayOf(0, 1, 2, 3, 4, 5, 6, 1, 2, 5) else intArrayOf(0, 1, 2, 3, 4, 5)
+        val sign = if (rnd.nextBoolean()) 1f else -1f
+        return Preset(
+            zoom = base?.zoom?.plus((rnd.nextFloat() - 0.5f) * 0.02f) ?: (0.975f + rnd.nextFloat() * 0.075f),
+            rot = (base?.rot?.let { abs(it) } ?: (0.003f + rnd.nextFloat() * 0.022f)) * sign,
+            warpMode = base?.warpMode ?: rnd.nextInt(3),
+            warp = base?.warp ?: (rnd.nextFloat() * 1.4f),
+            decay = base?.decay ?: (0.93f + rnd.nextFloat() * 0.04f),
+            emitter = if (base != null && rnd.nextFloat() < 0.6f) base.emitter else emitters[rnd.nextInt(emitters.size)],
+            segs = floatArrayOf(0f, 0f, 4f, 6f, 8f, 10f, 12f, 16f)[rnd.nextInt(8)],
+            hueSpeed = 10f + rnd.nextFloat() * 45f)
+    }
 
     private class Particle(var x: Float, var y: Float, var vx: Float, var vy: Float, var life: Float, var hue: Float)
     private val parts = ArrayList<Particle>()
@@ -198,7 +217,8 @@ private class VizRenderer : GLSurfaceView.Renderer {
             GLES20.glClearColor(0f, 0f, 0f, 1f); GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
         }
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-        if (djStyle) { cur = 11; nxt = 11 } else { cur = rnd.nextInt(11); nxt = cur }
+        curP = if (djStyle) randomPreset() else presets[rnd.nextInt(11)]
+        nxtP = curP
     }
 
     private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
@@ -211,24 +231,41 @@ private class VizRenderer : GLSurfaceView.Renderer {
         level += ((if (playing) AudioLevels.level else 0.15f + 0.05f * sin(time)) - level) * 0.3f
         bass += ((if (playing) AudioLevels.bass else 0.12f + 0.08f * sin(time * 2.1f)) - bass) * 0.35f
         bassAvg += (bass - bassAvg) * 0.02f
-        if (bass > bassAvg * 1.45f && bass > 0.12f && beat < 0.2f) { beat = 1f; onBeat(time) }
-        beat = max(0f, beat - dt * 2.5f)
-
-        // cambio automático de efecto con fundido
-        presetSince += dt
-        if (blend >= 1f && (presetSince > 20f || (presetSince > 12f && beat > 0.9f))) {
-            nxt = if (djStyle) { djIdx = (djIdx + 1) % djSeq.size; djSeq[djIdx] }
-                  else { var n: Int; do { n = rnd.nextInt(11) } while (n == cur); n }
-            blend = 0f; presetSince = 0f
+        // golpe de bombo: los graves del espectro suben de repente
+        val spec = AudioData.spec
+        var lowNow = 0f; for (i in 0 until 6) lowNow += spec[i]; lowNow /= 6f
+        lowAvg += (lowNow - lowAvg) * 0.05f
+        val kick = playing && lowNow > lowAvg * 1.3f && lowNow - lowPrev > 0.05f
+        lowPrev = lowNow
+        if ((kick || (bass > bassAvg * 1.45f && bass > 0.12f)) && beat < 0.3f) {
+            beat = 1f; onBeat(time)
+            hueKick += 20f + rnd.nextFloat() * 40f
+            rotKick = (if (djStyle) 0.05f else 0.02f) * kickDir
+            if (rnd.nextFloat() < 0.35f) kickDir = -kickDir
         }
-        if (blend < 1f) { blend = min(1f, blend + dt / 2.5f); if (blend >= 1f) cur = nxt }
-        val a = presets[cur]; val b = presets[nxt]; val k = if (cur == nxt) 1f else blend
-        val zoom = lerp(a.zoom, b.zoom, k) + beat * 0.03f
-        val rot = lerp(a.rot, b.rot, k) * (1f + level)
+        beat = max(0f, beat - dt * 2.5f)
+        // bajón fuerte (el "drop") o mezcla del DJ: destello y efecto nuevo
+        if (playing && bass > bassAvg * 2.2f && bassAvg < 0.3f && presetSince > 3f) { flash = 1f; if (djStyle) force = true }
+        if (AudioLevels.djEvent != lastDjEvent) { lastDjEvent = AudioLevels.djEvent; flash = 1f; force = true }
+
+        // cambio de efecto (al azar en el DJ) con fundido
+        presetSince += dt
+        val every = if (djStyle) 10f else 20f
+        if (blend >= 1f && (force || (presetSince > every && beat > 0.9f) || presetSince > every + 14f)) {
+            nxtP = if (djStyle) randomPreset() else { var n: Preset; do { n = presets[rnd.nextInt(11)] } while (n === curP); n }
+            blend = 0f; presetSince = 0f; force = false
+        }
+        if (blend < 1f) { blend = min(1f, blend + dt / (if (djStyle) 1.6f else 2.5f)); if (blend >= 1f) curP = nxtP }
+        val a = curP; val b = nxtP; val k = if (a === b) 1f else blend
+        val punch = if (djStyle) 0.07f else 0.035f
+        val zoom = lerp(a.zoom, b.zoom, k) + beat * punch + flash * 0.04f
+        val rot = lerp(a.rot, b.rot, k) * (1f + level) + rotKick
+        rotKick *= 0.88f
         val decay = lerp(a.decay, b.decay, k)
         val segs = if (k < 0.5f) a.segs else b.segs
         val hueSpeed = lerp(a.hueSpeed, b.hueSpeed, k)
-        val hue = (baseHue?.let { it + 30f * sin(time * 0.3f) } ?: (time * hueSpeed)) + bass * 60f
+        val hue = (baseHue?.let { it + 30f * sin(time * 0.3f) } ?: (time * hueSpeed)) + bass * 60f + hueKick
+        flash = max(0f, flash - dt * 1.8f)
 
         val dst = 1 - src
         // 1) estela: dibujar el cuadro anterior ampliado, girado y desvanecido
@@ -239,24 +276,25 @@ private class VizRenderer : GLSurfaceView.Renderer {
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0); GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[src])
         uf(progFeed, "zoom", zoom); uf(progFeed, "rot", rot); uf(progFeed, "time", time)
         uf(progFeed, "decay", decay); uf(progFeed, "bass", bass); uf(progFeed, "aspect", fw.toFloat() / fh)
-        uf(progFeed, "warp", lerp(a.warp, b.warp, k) * (0.6f + level)); uf(progFeed, "mode", (if (k < 0.5f) a.warpMode else b.warpMode).toFloat())
+        uf(progFeed, "warp", lerp(a.warp, b.warp, k) * (0.6f + level + beat * 0.5f)); uf(progFeed, "mode", (if (k < 0.5f) a.warpMode else b.warpMode).toFloat())
         drawQuad(progFeed)
 
         // 2) emisores (suma de luz)
         GLES20.glEnable(GLES20.GL_BLEND); GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE)
-        val ea = if (cur == nxt) 1f else 1f - blend
+        val ea = if (a === b) 1f else 1f - blend
         emit(a.emitter, hue, time, ea)
-        if (cur != nxt) emit(b.emitter, hue + 90f, time, blend)
+        if (a !== b) emit(b.emitter, hue + 90f, time, blend)
         drawParticles(dt)
 
-        // 3) mostrar con espejos de caleidoscopio
+        // 3) mostrar con espejos de caleidoscopio (late con el bombo)
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
         GLES20.glViewport(0, 0, w, h)
         GLES20.glDisable(GLES20.GL_BLEND)
         GLES20.glUseProgram(progShow)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[dst])
         uf(progShow, "segs", segs); uf(progShow, "time", time); uf(progShow, "aspect", w.toFloat() / h)
-        uf(progShow, "glow", 0.95f + beat * 0.2f)
+        uf(progShow, "glow", 0.9f + beat * (if (djStyle) 0.45f else 0.2f) + flash * 0.5f)
+        uf(progShow, "pulse", beat * (if (djStyle) 1f else 0.5f))
         drawQuad(progShow)
         src = dst
     }
@@ -412,11 +450,12 @@ private class VizRenderer : GLSurfaceView.Renderer {
             void main(){ gl_FragColor = vc; }"""
         const val FS_SHOW = """
             precision mediump float;
-            varying vec2 v; uniform sampler2D t; uniform float segs, time, aspect, glow;
+            varying vec2 v; uniform sampler2D t; uniform float segs, time, aspect, glow, pulse;
             void main(){
                 vec2 p = v - 0.5; p.x *= aspect;
+                p *= (1.0 - pulse * 0.08);
                 if (segs > 0.5) {
-                    float a = atan(p.y, p.x) + time * 0.05; float r = length(p);
+                    float a = atan(p.y, p.x) + time * 0.05 + pulse * 0.12; float r = length(p);
                     float s = 6.2831853 / segs; a = mod(a, s); a = abs(a - s * 0.5);
                     p = vec2(cos(a), sin(a)) * r;
                 }
