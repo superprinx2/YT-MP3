@@ -127,6 +127,8 @@ class VizView(ctx: Context) : GLSurfaceView(ctx) {
     fun start() { if (running) return; running = true; onResume(); Choreographer.getInstance().postFrameCallback(tick) }
     fun stop() { if (!running) return; running = false; Choreographer.getInstance().removeFrameCallback(tick); onPause() }
     fun skipPreset() { renderer.nextPreset() }
+    /** Color que más se ve ahora en la animación (para el aro del disco del DJ). 0 = aún no se sabe. */
+    val dominant: Int get() = renderer.dominant
 
     override fun onDetachedFromWindow() { stop(); super.onDetachedFromWindow() }
 }
@@ -137,6 +139,9 @@ private class VizRenderer : GLSurfaceView.Renderer {
     @Volatile var progress = 0f
     @Volatile var djStyle = false
     @Volatile var scale = 0.5f
+    @Volatile var dominant = 0
+    private var frameN = 0
+    private val pix: ByteBuffer = ByteBuffer.allocateDirect(24 * 24 * 4).order(ByteOrder.nativeOrder())
 
     private var w = 1; private var h = 1; private var fw = 1; private var fh = 1
     private val fbo = IntArray(2); private val tex = IntArray(2); private var src = 0
@@ -285,6 +290,7 @@ private class VizRenderer : GLSurfaceView.Renderer {
         emit(a.emitter, hue, time, ea)
         if (a !== b) emit(b.emitter, hue + 90f, time, blend)
         drawParticles(dt)
+        if (++frameN % 12 == 0) sampleDominant()
 
         // 3) mostrar con espejos de caleidoscopio (late con el bombo)
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
@@ -297,6 +303,28 @@ private class VizRenderer : GLSurfaceView.Renderer {
         uf(progShow, "pulse", beat * (if (djStyle) 1f else 0.5f))
         drawQuad(progShow)
         src = dst
+    }
+
+    /** Lee 4 parches pequeños del cuadro y saca el color más vivo que predomina. */
+    private fun sampleDominant() {
+        var sr = 0.0; var sg = 0.0; var sb = 0.0; var sw = 0.0
+        val spots = arrayOf(floatArrayOf(0.3f, 0.3f), floatArrayOf(0.7f, 0.3f), floatArrayOf(0.3f, 0.7f), floatArrayOf(0.7f, 0.7f))
+        for (sp in spots) {
+            val x = (fw * sp[0]).toInt().coerceIn(0, fw - 24); val y = (fh * sp[1]).toInt().coerceIn(0, fh - 24)
+            pix.clear()
+            GLES20.glReadPixels(x, y, 24, 24, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pix)
+            for (i in 0 until 24 * 24) {
+                val r = pix.get(i * 4).toInt() and 0xFF; val g = pix.get(i * 4 + 1).toInt() and 0xFF; val b = pix.get(i * 4 + 2).toInt() and 0xFF
+                val mx = maxOf(r, g, b); val mn = minOf(r, g, b)
+                val w = ((mx - mn) / 255.0) * (mx / 255.0) + 0.002   // pesa más lo colorido y brillante
+                sr += r * w; sg += g * w; sb += b * w; sw += w
+            }
+        }
+        if (sw <= 0.01) return
+        val hsv = FloatArray(3)
+        Color.colorToHSV(Color.rgb((sr / sw).toInt(), (sg / sw).toInt(), (sb / sw).toInt()), hsv)
+        hsv[1] = hsv[1].coerceAtLeast(0.55f); hsv[2] = 1f
+        dominant = Color.HSVToColor(hsv)
     }
 
     private fun onBeat(time: Float) {

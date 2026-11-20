@@ -644,7 +644,9 @@ class DownloadService : Service() {
         if (item.platform == Platform.SPOTIFY && item.thumbUrl != null) {
             runCatching {
                 val f = File(Library.dir(this, "covers"), "$safe.jpg")
-                java.net.URL(item.thumbUrl).openStream().use { i -> f.outputStream().use { i.copyTo(it) } }
+                // la portada de esta canción (no la de la playlist)
+                val url = SpotifySource.trackCover(item.id) ?: item.thumbUrl
+                java.net.URL(url).openStream().use { i -> f.outputStream().use { i.copyTo(it) } }
                 cover = f
             }
         }

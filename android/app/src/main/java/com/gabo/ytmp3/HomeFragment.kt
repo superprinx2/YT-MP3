@@ -28,8 +28,9 @@ class HomeFragment : Fragment() {
     private lateinit var topSub: TextView
     private lateinit var localSub: TextView
     private lateinit var djSub: TextView
-    private lateinit var djKaleido: KaleidoView
-    private lateinit var djKaleido2: KaleidoView
+    /** Fondo animado de las tarjetas del DJ: el visualizador nuevo (o el caleidoscopio en modo ahorro). */
+    private lateinit var djBg: View
+    private fun djBgRun(on: Boolean) { (djBg as? VizView)?.let { if (on) it.start() else it.stop() }; (djBg as? KaleidoView)?.running = on }
     private lateinit var stats: LinearLayout
     private lateinit var statsCover: ImageView
     private lateinit var statsTitle: TextView
@@ -64,10 +65,9 @@ class HomeFragment : Fragment() {
         // Modo DJ: aleatorio total o por estado de ánimo
         val djRow = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL }
         fun djCard(title: String, sub: String, tint: Int, onClick: () -> Unit) = FrameLayout(c).apply {
-            clipToOutline = true; background = roundRect(Color.BLACK, c.dp(14).toFloat())
+            clipToOutline = true; background = roundRect(Color.TRANSPARENT, c.dp(14).toFloat())
             foreground = c.getDrawable(android.R.drawable.list_selector_background)
-            addView(KaleidoView(c).apply { seed = tint.toLong(); tag = "k" }, FrameLayout.LayoutParams(MATCH, MATCH))
-            addView(View(c).apply { setBackgroundColor(0x99000000.toInt()) }, FrameLayout.LayoutParams(MATCH, MATCH))
+            addView(View(c).apply { setBackgroundColor(0x77000000) }, FrameLayout.LayoutParams(MATCH, MATCH))
             val inner = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL; setPadding(c.dp(14), c.dp(14), c.dp(14), c.dp(14)) }
             inner.addView(VinylView(c, tint), lp(c.dp(54), c.dp(54)))
             inner.addView(View(c), lp(1, 0, 1f))
@@ -80,9 +80,27 @@ class HomeFragment : Fragment() {
         val dj2 = djCard("🎧 Por estado de ánimo", "¿Cómo te sientes hoy?", 0xFFB14DFF.toInt()) { (activity as? MainActivity)?.openMoods() }
         djRow.addView(dj1, lp(0, c.dp(170), 1f).apply { marginEnd = c.dp(6) })
         djRow.addView(dj2, lp(0, c.dp(170), 1f).apply { marginStart = c.dp(6) })
-        col.addView(djRow, lp(MATCH, WRAP).apply { topMargin = c.dp(12) })
-        djKaleido = dj1.findViewWithTag("k")
-        djKaleido2 = dj2.findViewWithTag("k")
+        // Un solo visualizador detrás de las dos tarjetas; una máscara del color de la página
+        // dibuja las esquinas redondeadas y el espacio entre ellas.
+        val djBox = FrameLayout(c)
+        djBg = if (Prefs2(c).saver) KaleidoView(c).apply { seed = BRAND_RED.toLong() } else VizView(c).apply { djStyle = true }
+        djBox.addView(djBg, FrameLayout.LayoutParams(MATCH, MATCH))
+        djBox.addView(djRow, FrameLayout.LayoutParams(MATCH, WRAP))
+        val pageBg = c.col(R.color.ios_bg)
+        val mask = object : View(c) {
+            private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = pageBg }
+            private val path = android.graphics.Path()
+            override fun onDraw(cv: android.graphics.Canvas) {
+                path.reset(); path.fillType = android.graphics.Path.FillType.EVEN_ODD
+                path.addRect(0f, 0f, width.toFloat(), height.toFloat(), android.graphics.Path.Direction.CW)
+                val r = c.dp(14).toFloat()
+                for (v in listOf(dj1, dj2)) path.addRoundRect(v.left.toFloat(), v.top.toFloat(), v.right.toFloat(), v.bottom.toFloat(), r, r, android.graphics.Path.Direction.CW)
+                cv.drawPath(path, paint)
+            }
+        }
+        djBox.addView(mask, FrameLayout.LayoutParams(MATCH, MATCH))
+        djRow.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> mask.invalidate() }
+        col.addView(djBox, lp(MATCH, WRAP).apply { topMargin = c.dp(12) })
         djSub = c.text("", 1f, Color.TRANSPARENT)
 
         // Tus estadísticas
@@ -124,13 +142,13 @@ class HomeFragment : Fragment() {
     override fun onResume() {
         super.onResume()
         avatar.setImageBitmap(Covers.avatarBitmap(requireContext()))
-        djKaleido.running = true; djKaleido2.running = true
+        djBgRun(!isHidden)
         loadStats()
     }
 
-    override fun onPause() { djKaleido.running = false; djKaleido2.running = false; super.onPause() }
+    override fun onPause() { djBgRun(false); super.onPause() }
 
-    override fun onHiddenChanged(hidden: Boolean) { djKaleido.running = !hidden; djKaleido2.running = !hidden; if (!hidden) loadStats() }
+    override fun onHiddenChanged(hidden: Boolean) { djBgRun(!hidden); if (!hidden) loadStats() }
 
     private fun settings(section: String?) =
         startActivity(Intent(requireContext(), SettingsActivity::class.java).putExtra(SettingsActivity.EXTRA_SECTION, section))

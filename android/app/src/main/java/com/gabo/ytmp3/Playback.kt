@@ -106,7 +106,16 @@ class PlaybackService : MediaSessionService() {
     private var lastAdj = 0f
     val djUpcoming: List<Track> get() = listOfNotNull(nextStep?.track) + (dj?.upcoming ?: emptyList())
     val djSegment: Pair<Long, Long> get() = djSegStart to djSegEnd
-    val djMixLabel: String? get() = mixing?.mix?.label
+    val djMixLabel: String? get() = if (manualT != null) "Mezcla manual (crossfader)" else mixing?.mix?.label
+    /** Avance de la mezcla en curso 0..1 (el crossfader de la pantalla lo sigue). */
+    val mixProgress: Float get() = if (!fading || mixing == null) 0f
+        else manualT ?: ((SystemClock.elapsedRealtime() - fadeStart).toFloat() / fadeLen).coerceIn(0f, 1f)
+    /** Posición del crossfader cuando la mezcla la hace el usuario (null = automática). */
+    private var manualT: Float? = null
+    private var scratching = false
+    private var scratchSeekAt = 0L
+    private var scratchParamsAt = 0L
+    private var scratchBack = 0f
     private lateinit var prefs: Prefs2
 
     /** Cola actual (en orden de la playlist). */
@@ -547,6 +556,7 @@ class PlaybackService : MediaSessionService() {
     private fun completeFade() {
         if (!fading) return
         fading = false
+        manualT = null
         val out = active
         val inc = other
         out.pause()
@@ -637,6 +647,7 @@ class PlaybackService : MediaSessionService() {
 
     private fun djStep() {
         if (fading) { djMixStep(); return }
+        if (scratching) return
         val n = nextStep ?: return
         if (!active.isPlaying) return
         // Nunca pasarse del final real del archivo
@@ -708,7 +719,7 @@ class PlaybackService : MediaSessionService() {
         val m = mixing ?: run { step0(); return }
         val out = active; val inc = other
         val po = procs[out]; val pi = procs[inc]
-        val t = ((SystemClock.elapsedRealtime() - fadeStart).toFloat() / fadeLen).coerceIn(0f, 1f)
+        val t = manualT ?: ((SystemClock.elapsedRealtime() - fadeStart).toFloat() / fadeLen).coerceIn(0f, 1f)
         val vo = volFor(trackOf(out)); val vi = volFor(m.track)
         fun ease(x: Float) = sin(x.coerceIn(0f, 1f) * PI.toFloat() / 2)
         val outBeat = 60000f / (trackOf(out)?.bpm ?: 120f)
@@ -776,7 +787,7 @@ class PlaybackService : MediaSessionService() {
             if (abs(err) < 25f) adj = 0f
             if (abs(adj - lastAdj) > 0.004f) { lastAdj = adj; inc.setPlaybackParameters(PlaybackParameters(m.speed * (1f + adj))) }
         }
-        if (t >= 1f) completeFade()
+        if (t >= 1f && manualT == null) completeFade()
     }
 
     private fun step0() { if (fading) completeFade() }
@@ -812,6 +823,88 @@ class PlaybackService : MediaSessionService() {
         // la parte actual "termina" ahora
         djSegEnd = active.currentPosition + ((nextStep?.lenMs ?: 0L) * curSpeed).toLong()
         beginMix()
+    }
+
+    // ------------------------------------------------------------------ crossfader y scratch (pantalla del DJ)
+    /** El usuario mueve el crossfader: 0 = canción actual, 1 = la que sigue. */
+    fun crossfade(pos: Float) {
+        dj ?: return
+        if (!fading) {
+            if (pos < 0.03f || scratching) return
+            if (nextStep == null) planNext(false)
+            val n = nextStep ?: return
+            // mezcla con ecualizador de 3 bandas, con los golpes alineados
+            val beat = 60000f / ((trackOf(active)?.bpm ?: 120f) * curSpeed)
+            val len = (beat * 16).toLong().coerceIn(3000L, 16_000L)
+            val entry = (n.part.first - (len * n.speed).toLong()).coerceAtLeast(0)
+            if (armed && entry != n.entry) armed = false
+            nextStep = DjStep(n.track, n.speed, n.part, entry, Mix.EQ, len, null)
+            djSegEnd = active.currentPosition + (len * curSpeed).toLong()
+            manualT = pos
+            beginMix()
+            return
+        }
+        if (mixing == null) return
+        manualT = pos.coerceIn(0f, 1f)
+        if (pos >= 0.985f) { manualT = null; completeFade(); return }
+        djMixStep()
+    }
+
+    /** Suelta el crossfader: si volvió al inicio, se cancela la mezcla y sigue la canción actual. */
+    fun crossfadeRelease(pos: Float) {
+        if (!fading || manualT == null) return
+        if (pos < 0.03f) {
+            val m = mixing
+            fading = false; manualT = null; mixing = null
+            other.pause(); procs[other]?.resetFx()
+            procs[active]?.resetFx(); active.volume = volFor(trackOf(active))
+            if (m != null) { nextStep = m; armed = false }
+            djSegEnd = active.currentPosition + 60_000
+            notifyUi()
+        }
+    }
+
+    fun scratchStart() {
+        if (fading) { if (manualT != null) crossfadeRelease(0f) else finishMixNow() }
+        scratching = true; scratchBack = 0f
+    }
+
+    /** [vel] grados/s (positivo = horario), [deg] grados desde el último aviso. 200 °/s = velocidad normal. */
+    fun scratch(vel: Float, deg: Float) {
+        if (!scratching) return
+        val p = active
+        val now = SystemClock.elapsedRealtime()
+        val vol = volFor(trackOf(p))
+        if (vel >= -15f) {
+            // hacia adelante: más rápido cuanto más rápido gira (quieto = "frena" el disco)
+            if (now - scratchParamsAt > 70) {
+                scratchParamsAt = now
+                val sp = (vel / 200f).coerceIn(0.35f, 3f)
+                p.setPlaybackParameters(PlaybackParameters(curSpeed * sp, 1f))
+                p.volume = if (vel < 40f) vol * 0.35f else vol
+            }
+        } else {
+            // hacia atrás: retrocede lo que se giró
+            scratchBack += -deg / 200f * 1000f * curSpeed
+            if (now - scratchSeekAt > 110 && scratchBack > 30f) {
+                scratchSeekAt = now
+                p.volume = vol * 0.5f
+                p.seekTo((p.currentPosition - scratchBack.toLong()).coerceAtLeast(0))
+                scratchBack = 0f
+            }
+        }
+    }
+
+    fun scratchEnd() {
+        if (!scratching) return
+        scratching = false
+        active.setPlaybackParameters(PlaybackParameters(curSpeed))
+        active.volume = volFor(trackOf(active))
+        if (active.playWhenReady.not()) active.play()
+        // si retrocedió antes de donde estaba la parte, la parte sigue hasta su final de siempre
+        if (active.currentPosition < djSegStart) djSegStart = active.currentPosition
+        armed = false
+        notifyUi()
     }
 
     /** El plato se quedó sin música (fin del archivo o error): seguir sin silencio. */

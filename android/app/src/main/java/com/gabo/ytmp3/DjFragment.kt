@@ -33,78 +33,131 @@ import kotlinx.coroutines.launch
 import kotlin.math.sin
 
 /**
- * Disco de vinilo "DownSong": negro con surcos, las ondas rojas del logo y la portada de la
- * playlist como etiqueta. Gira, refleja la luz y salta con los bajos.
+ * Plato del DJ (estilo jog wheel): la portada ocupa todo el disco, con surcos encima, una marca
+ * que gira y un aro que toma el color que domina en la animación de fondo. Salta con los bajos.
+ * Con el dedo funciona como un plato de verdad: girar a la derecha adelanta la canción (más
+ * rápido cuanto más rápido gires), a la izquierda retrocede; un toque sin girar = saltar.
  */
 class VinylView(ctx: Context, var tint: Int = BRAND_RED) : View(ctx) {
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
     private var angle = 0f
     private var speed = 40f          // grados por segundo
     private var last = SystemClock.uptimeMillis()
-    private var labelShader: BitmapShader? = null
+    private var shader: BitmapShader? = null
     private val m = Matrix()
     var spinning = true
     /** Salta con los bajos de la música (pantalla del DJ). */
     var reactive = false
     var cover: Bitmap? = null
-        set(v) { field = v; labelShader = v?.let { BitmapShader(it, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP) }; invalidate() }
+        set(v) { field = v; shader = v?.let { BitmapShader(it, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP) }; invalidate() }
+    /** Color al que va el aro (el que domina en el fondo). */
+    var ringTarget: Int = 0
+    private var ring = BRAND_RED
+
+    // scratch
+    var scratchable = false
+    var onTap: (() -> Unit)? = null
+    var onScratchStart: (() -> Unit)? = null
+    /** Velocidad en grados/s (positivo = horario) y grados movidos desde el último aviso. */
+    var onScratch: ((Float, Float) -> Unit)? = null
+    var onScratchEnd: (() -> Unit)? = null
+    private var touching = false
+    private var lastTouchAng = 0f
+    private var lastTouchT = 0L
+    private var moved = 0f
+    private var vel = 0f
 
     fun kick() {
         speed = 900f
-        animate().cancel(); scaleX = 0.78f; scaleY = 0.78f
+        animate().cancel(); scaleX = 0.82f; scaleY = 0.82f
         animate().scaleX(1f).scaleY(1f).setDuration(420).setInterpolator(OvershootInterpolator(3.5f)).start()
     }
+
+    private fun touchAngle(x: Float, y: Float) = Math.toDegrees(kotlin.math.atan2((y - height / 2f).toDouble(), (x - width / 2f).toDouble())).toFloat()
+
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(e: android.view.MotionEvent): Boolean {
+        if (!scratchable) return super.onTouchEvent(e)
+        when (e.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                touching = true; moved = 0f; vel = 0f
+                lastTouchAng = touchAngle(e.x, e.y); lastTouchT = SystemClock.uptimeMillis()
+                parent?.requestDisallowInterceptTouchEvent(true)
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                val a = touchAngle(e.x, e.y)
+                var d = a - lastTouchAng
+                if (d > 180f) d -= 360f
+                if (d < -180f) d += 360f
+                val now = SystemClock.uptimeMillis()
+                val dt = ((now - lastTouchT).coerceAtLeast(1)) / 1000f
+                if (kotlin.math.abs(moved) < 12f && kotlin.math.abs(moved + d) >= 12f) onScratchStart?.invoke()
+                moved += d
+                vel = vel * 0.6f + (d / dt) * 0.4f
+                angle = (angle + d) % 360f
+                lastTouchAng = a; lastTouchT = now
+                if (kotlin.math.abs(moved) >= 12f) onScratch?.invoke(vel, d)
+            }
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                touching = false
+                parent?.requestDisallowInterceptTouchEvent(false)
+                if (kotlin.math.abs(moved) < 12f) { if (e.actionMasked == android.view.MotionEvent.ACTION_UP) { performClick(); onTap?.invoke() } }
+                else { speed = (vel * 0.5f).coerceIn(-600f, 900f); onScratchEnd?.invoke() }
+            }
+        }
+        return true
+    }
+
+    override fun performClick(): Boolean { super.performClick(); return true }
 
     override fun onDraw(c: Canvas) {
         val now = SystemClock.uptimeMillis(); val dt = (now - last) / 1000f; last = now
         val base = if (reactive) 70f else 40f
-        if (spinning) angle = (angle + speed * dt) % 360f
+        if (spinning && !touching) angle = (angle + speed * dt) % 360f
         speed += (base - speed) * (dt * 2.2f).coerceAtMost(1f)
+        if (ringTarget != 0) ring = androidx.core.graphics.ColorUtils.blendARGB(ring, ringTarget, (dt * 2f).coerceIn(0f, 1f))
         val bass = if (reactive) AudioLevels.bass else 0f
         val cx = width / 2f; val cy = height / 2f
-        val r = minOf(cx, cy) * 0.94f * (1f + bass * 0.035f)
+        val R = minOf(cx, cy) * 0.96f * (1f + bass * 0.03f)
+        // aro exterior (jog wheel) con el color del fondo
+        p.shader = null
+        p.style = Paint.Style.FILL; p.color = 0xFF151515.toInt(); c.drawCircle(cx, cy, R, p)
+        p.style = Paint.Style.STROKE; p.strokeWidth = R * 0.075f
+        p.color = androidx.core.graphics.ColorUtils.setAlphaComponent(ring, (190 + 65 * bass).toInt().coerceIn(0, 255))
+        c.drawCircle(cx, cy, R * 0.955f, p)
+        p.strokeWidth = R * 0.012f; p.color = 0x55FFFFFF; c.drawCircle(cx, cy, R * 0.905f, p)
+        val r = R * 0.885f
         c.save(); c.rotate(angle, cx, cy)
-        // disco
-        p.style = Paint.Style.FILL; p.shader = null; p.color = 0xFF0B0B0B.toInt()
-        c.drawCircle(cx, cy, r, p)
-        // surcos
-        p.style = Paint.Style.STROKE; p.strokeWidth = r * 0.006f; p.color = 0x1CFFFFFF
-        var k = 0.95f; while (k > 0.5f) { c.drawCircle(cx, cy, r * k, p); k -= 0.028f }
-        // ondas rojas del logo
-        val glow = (0.55f + bass * 0.45f).coerceIn(0f, 1f)
-        floatArrayOf(0.965f, 0.885f, 0.805f).forEachIndexed { i, rr ->
-            p.strokeWidth = r * (0.016f - i * 0.003f)
-            p.color = androidx.core.graphics.ColorUtils.setAlphaComponent(BRAND_RED, ((0xD0 - i * 0x40) * glow).toInt().coerceIn(0, 255))
-            c.drawCircle(cx, cy, r * rr, p)
-        }
-        // etiqueta: portada o color con el monograma
-        val lr = r * 0.46f
+        // la portada ocupa todo el disco
+        val sh = shader; val bmp = cover
         p.style = Paint.Style.FILL
-        val sh = labelShader
-        val bmp = cover
         if (sh != null && bmp != null) {
-            val sc = (lr * 2) / minOf(bmp.width, bmp.height)
-            m.reset(); m.setScale(sc, sc)
-            m.postTranslate(cx - bmp.width * sc / 2, cy - bmp.height * sc / 2)
+            val sc = (r * 2) / minOf(bmp.width, bmp.height)
+            m.reset(); m.setScale(sc, sc); m.postTranslate(cx - bmp.width * sc / 2, cy - bmp.height * sc / 2)
             sh.setLocalMatrix(m); p.shader = sh
-            c.drawCircle(cx, cy, lr, p); p.shader = null
+            c.drawCircle(cx, cy, r, p); p.shader = null
         } else {
-            p.color = tint; c.drawCircle(cx, cy, lr, p)
-            p.color = 0xFFFFFFFF.toInt(); p.textAlign = Paint.Align.CENTER; p.textSize = lr * 0.62f
-            p.isFakeBoldText = true
-            c.drawText("DG", cx, cy + lr * 0.22f, p)
-            p.isFakeBoldText = false
+            p.shader = android.graphics.RadialGradient(cx, cy, r, tint, darker(tint, 0.35f), Shader.TileMode.CLAMP)
+            c.drawCircle(cx, cy, r, p); p.shader = null
+            p.color = 0xFFFFFFFF.toInt(); p.textAlign = Paint.Align.CENTER; p.textSize = r * 0.32f; p.isFakeBoldText = true
+            c.drawText("DG", cx, cy + r * 0.11f, p); p.isFakeBoldText = false
         }
-        p.style = Paint.Style.STROKE; p.strokeWidth = r * 0.022f; p.color = BRAND_RED
-        c.drawCircle(cx, cy, lr, p)
-        p.style = Paint.Style.FILL; p.color = 0xFF111111.toInt(); c.drawCircle(cx, cy, r * 0.045f, p)
-        p.style = Paint.Style.STROKE; p.strokeWidth = r * 0.01f; p.color = 0x66FFFFFF; c.drawCircle(cx, cy, r * 0.045f, p)
+        // surcos de vinilo encima de la portada
+        p.style = Paint.Style.STROKE; p.strokeWidth = r * 0.005f; p.color = 0x26000000
+        var k = 0.97f; while (k > 0.3f) { c.drawCircle(cx, cy, r * k, p); k -= 0.032f }
+        p.color = 0x14FFFFFF; k = 0.955f; while (k > 0.3f) { c.drawCircle(cx, cy, r * k, p); k -= 0.064f }
+        // marca que gira (como la de un plato)
+        p.style = Paint.Style.FILL; p.color = 0xEEFFFFFF.toInt()
+        c.drawRoundRect(cx - r * 0.025f, cy - r * 0.98f, cx + r * 0.025f, cy - r * 0.78f, r * 0.02f, r * 0.02f, p)
         c.restore()
+        // eje central
+        p.style = Paint.Style.FILL; p.color = 0xFF0E0E0E.toInt(); c.drawCircle(cx, cy, r * 0.075f, p)
+        p.style = Paint.Style.STROKE; p.strokeWidth = r * 0.012f; p.color = 0x88FFFFFF.toInt(); c.drawCircle(cx, cy, r * 0.075f, p)
         // brillo de la luz (no gira: así se nota el giro del disco)
-        p.style = Paint.Style.STROKE; p.strokeWidth = r * 0.22f; p.color = 0x16FFFFFF
-        val o = r * 0.73f
+        p.strokeWidth = r * 0.2f; p.color = 0x14FFFFFF
+        val o = r * 0.7f
         c.drawArc(cx - o, cy - o, cx + o, cy + o, -150f, 50f, false, p)
-        p.color = 0x10FFFFFF
+        p.color = 0x0EFFFFFF
         c.drawArc(cx - o, cy - o, cx + o, cy + o, 30f, 45f, false, p)
         if (isShown) postInvalidateOnAnimation()
     }
@@ -211,6 +264,8 @@ class DjFragment : Fragment() {
     private val listener: () -> Unit = { render() }
     private var loadingVinyl: VinylView? = null
     private var playlistCover: Bitmap? = null
+    private lateinit var xfader: android.widget.SeekBar
+    private var faderTouch = false
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, s: Bundle?): View {
         val c = requireContext()
@@ -230,17 +285,51 @@ class DjFragment : Fragment() {
         top.addView(c.icon(R.drawable.ic_more_h, 44, Color.WHITE, 9).apply { setOnClickListener { it.haptic(); showQueue() } })
         col.addView(top, lp(MATCH, WRAP).apply { topMargin = c.dp(6) })
         col.addView(View(c), lp(1, 0, 1f))
-        title = c.text("", 26f, Color.WHITE, 2, 2)
-        artist = c.text("", 16f, 0xCCFFFFFF.toInt())
-        nextText = c.text("", 13f, 0xAAFFFFFF.toInt(), 1).apply { setPadding(0, c.dp(10), 0, 0) }
-        mixText = c.text("", 12f, 0xFFFF6B6B.toInt(), 1).apply { setPadding(0, c.dp(4), 0, 0) }
-        col.addView(title); col.addView(artist); col.addView(nextText); col.addView(mixText)
+        // nombre y datos: más chicos, algo transparentes y cerca del disco
+        title = c.text("", 20f, 0xDDFFFFFF.toInt(), 2, 2)
+        artist = c.text("", 12f, 0xB8FFFFFF.toInt())
+        nextText = c.text("", 11f, 0xA0FFFFFF.toInt(), 1).apply { setPadding(0, c.dp(6), 0, 0) }
+        mixText = c.text("", 11f, 0xD0FF8A8A.toInt(), 1).apply { setPadding(0, c.dp(2), 0, 0) }
+        listOf(title, artist, nextText, mixText).forEach { it.setShadowLayer(8f, 0f, 1f, 0xAA000000.toInt()); col.addView(it) }
         vinyl = VinylView(c, m?.color ?: BRAND_RED).apply {
-            reactive = true
-            setOnClickListener { v -> v.haptic(true); kick(); PlayerHub.service?.djNext(true) }
+            reactive = true; scratchable = true
+            contentDescription = "Saltar canción"
+            onTap = { haptic(true); kick(); PlayerHub.service?.djNext(true) }
+            onScratchStart = { haptic(); PlayerHub.service?.scratchStart() }
+            onScratch = { v, d -> PlayerHub.service?.scratch(v, d) }
+            onScratchEnd = { PlayerHub.service?.scratchEnd() }
         }
-        col.addView(vinyl, lp(c.dp(196), c.dp(196)).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = c.dp(22) })
-        col.addView(c.text("Saltar", 14f, Color.WHITE, 2).apply { gravity = Gravity.CENTER; setPadding(0, c.dp(6), 0, c.dp(30)) }, lp(MATCH, WRAP))
+        col.addView(vinyl, lp(c.dp(147), c.dp(147)).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = c.dp(14) })
+        col.addView(c.text("Toca para saltar · gira para adelantar o retroceder", 11f, 0xB0FFFFFF.toInt(), 1).apply {
+            gravity = Gravity.CENTER; setPadding(0, c.dp(6), 0, c.dp(4)); setShadowLayer(8f, 0f, 1f, 0xAA000000.toInt())
+        }, lp(MATCH, WRAP))
+        // crossfader: deslizar hacia la derecha mezcla con la canción que sigue
+        xfader = android.widget.SeekBar(c).apply {
+            max = 1000; progress = 0
+            splitTrack = false
+            progressDrawable = android.graphics.drawable.InsetDrawable(roundRect(0x55FFFFFF, c.dp(3).toFloat()), 0, c.dp(17), 0, c.dp(17))
+            thumb = GradientDrawable().apply {
+                setColor(0xFFEDEDED.toInt()); cornerRadius = c.dp(5).toFloat(); setStroke(c.dp(2), 0xFF333333.toInt())
+                setSize(c.dp(20), c.dp(34))
+            }
+            setPadding(c.dp(16), 0, c.dp(16), 0)
+            contentDescription = "Crossfader"
+            setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: android.widget.SeekBar, p: Int, fromUser: Boolean) {
+                    if (fromUser) PlayerHub.service?.crossfade(p / 1000f)
+                }
+                override fun onStartTrackingTouch(sb: android.widget.SeekBar) { faderTouch = true; sb.haptic() }
+                override fun onStopTrackingTouch(sb: android.widget.SeekBar) {
+                    faderTouch = false
+                    PlayerHub.service?.crossfadeRelease(sb.progress / 1000f)
+                }
+            })
+        }
+        val faderRow = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        faderRow.addView(c.text("A", 12f, 0xB0FFFFFF.toInt(), 2))
+        faderRow.addView(xfader, lp(0, c.dp(40), 1f))
+        faderRow.addView(c.text("B", 12f, 0xB0FFFFFF.toInt(), 2))
+        col.addView(faderRow, lp(MATCH, WRAP).apply { setMargins(c.dp(22), 0, c.dp(22), c.dp(12)) })
         root.addView(col, FrameLayout.LayoutParams(MATCH, MATCH))
 
         loading = LinearLayout(c).apply {
@@ -369,9 +458,11 @@ class DjFragment : Fragment() {
             if (s != null && v != null) {
                 val d = s.active.duration
                 if (d > 0) v.progress = s.active.currentPosition.toFloat() / d
+                v.dominant.takeIf { it != 0 }?.let { vinyl.ringTarget = it }
             }
+            if (s != null && !faderTouch && ::xfader.isInitialized) xfader.progress = (s.mixProgress * 1000).toInt()
             if (s != null) render()
-            view?.postDelayed(this, 250)
+            view?.postDelayed(this, 120)
         }
     }
 
@@ -383,6 +474,7 @@ class DjFragment : Fragment() {
         artist.text = t.artist.ifEmpty { "" }
         nextText.text = s.djUpcoming.firstOrNull()?.let { "Sigue: ${it.title}" } ?: ""
         mixText.text = s.djMixLabel?.let { "🎚 $it" } ?: ""
+        if (bg !is VizView) vinyl.ringTarget = mood?.color ?: BRAND_RED
         if (t.id != lastId) {
             lastId = t.id; (bg as? VizView)?.envelope = Analyzer.envelope(t)
             if (playlistCover == null) {

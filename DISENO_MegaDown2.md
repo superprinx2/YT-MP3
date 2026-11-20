@@ -75,3 +75,13 @@ DJ desde playlist y desde canción).
 - **Visualizador del DJ:** efectos al azar y reacción fuerte al bombo, destellos en los drops y en cada mezcla.
 - **Descargar:** buscador único estilo YouTube (filtros, voz, menú), flecha atrás, descargas de TikTok/IG/FB/Spotify sin
   salir de la red (hoja encima con formato), y "Guardar también en el celular" eligiendo la carpeta con la pantalla de carpetas.
+
+## v2.4
+- Pantalla del DJ: un solo plato abajo (25 % más chico), estilo jog wheel con la portada en todo el disco y aro del color
+  que domina en el fondo; scratch (horario adelanta, antihorario retrocede); toque = saltar.
+- Crossfader debajo del plato: deslizar hacia B mezcla a mano (ecualizador de 3 bandas, golpes alineados); en las mezclas
+  automáticas se mueve solo. Sin botón AUTO.
+- Nombre y datos más chicos (−25 %), semitransparentes y junto al disco.
+- Inicio: las tarjetas del DJ usan el visualizador nuevo.
+- Descargar: "Buscar en <red> o pegar enlace" que se desplaza para leerse completo.
+- Spotify: cada canción baja con su propia portada (no la de la playlist).

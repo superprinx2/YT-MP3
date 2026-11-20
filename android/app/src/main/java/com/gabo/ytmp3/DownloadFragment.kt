@@ -53,6 +53,7 @@ class DownloadFragment : Fragment(), BackAware {
     private lateinit var backBtn: android.widget.ImageView
     private lateinit var logoBadge: android.widget.ImageView
     private lateinit var filterBtn: android.widget.ImageView
+    private lateinit var hintMarquee: android.widget.TextView
 
     private val voice = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         val said = r.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull() ?: return@registerForActivityResult
@@ -150,6 +151,7 @@ class DownloadFragment : Fragment(), BackAware {
         }
         h.urlInput.addTextChangedListener(object : android.text.TextWatcher {
             override fun afterTextChanged(s: android.text.Editable?) {
+                if (::hintMarquee.isInitialized) hintMarquee.visibility = if (s.isNullOrEmpty()) View.VISIBLE else View.GONE
                 h.btnClear.visibility = if (s.isNullOrEmpty() || DownloadState.running) View.GONE else View.VISIBLE
             }
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
@@ -260,7 +262,7 @@ class DownloadFragment : Fragment(), BackAware {
         }
         if (animate) tabs[p]?.bounce()
         heroView?.setPalette(p.palette)
-        h.urlInput.hint = "Buscar en ${p.label}"
+        if (::hintMarquee.isInitialized) { hintMarquee.text = "Buscar en ${p.label} o pegar enlace"; hintMarquee.isSelected = true }
         if (::logoBadge.isInitialized) {
             logoBadge.setBackgroundResource(when (p) {
                 Platform.YOUTUBE -> R.drawable.bg_tab_youtube; Platform.SPOTIFY -> R.drawable.bg_tab_spotify
@@ -336,7 +338,17 @@ class DownloadFragment : Fragment(), BackAware {
             old.removeView(h.urlInput); old.removeView(h.btnClear); old.visibility = View.GONE
         }
         h.urlInput.textSize = 16f
-        pillBox.addView(h.urlInput, lp(0, ctx.dp(44), 1f))
+        h.urlInput.hint = ""
+        // el texto de ayuda se desplaza (tipo anuncio) para leerse completo aunque no quepa
+        hintMarquee = ctx.text("", 16f, ctx.col(R.color.ios_secondary)).apply {
+            isSingleLine = true; ellipsize = android.text.TextUtils.TruncateAt.MARQUEE
+            marqueeRepeatLimit = -1; isSelected = true; isClickable = false; isFocusable = false
+            setHorizontallyScrolling(true)
+        }
+        val fieldBox = android.widget.FrameLayout(ctx)
+        fieldBox.addView(h.urlInput, android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
+        fieldBox.addView(hintMarquee, android.widget.FrameLayout.LayoutParams(MATCH, WRAP, android.view.Gravity.CENTER_VERTICAL))
+        pillBox.addView(fieldBox, lp(0, ctx.dp(44), 1f))
         pillBox.addView(h.btnClear, lp(ctx.dp(34), ctx.dp(34)))
         filterBtn = ctx.icon(R.drawable.ic_tune, 40, label, 9).apply {
             contentDescription = "Filtros de búsqueda"

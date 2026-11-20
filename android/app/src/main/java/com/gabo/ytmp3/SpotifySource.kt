@@ -59,6 +59,13 @@ object SpotifySource {
         return null
     }
 
+    /** Portada de UNA canción (en una playlist cada canción tiene la de su propio álbum). */
+    fun trackCover(id: String): String? = runCatching {
+        if (id.startsWith("sp")) return null
+        val js = JSONObject(get("https://open.spotify.com/oembed?url=https://open.spotify.com/track/$id"))
+        js.optString("thumbnail_url").takeIf { it.startsWith("http") }
+    }.getOrNull()
+
     /** Devuelve (nombre, ¿es lista?, canciones). */
     fun fetch(url: String): Triple<String, Boolean, List<VideoItem>> {
         val ref = resolve(url)
