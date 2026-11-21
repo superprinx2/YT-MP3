@@ -194,7 +194,7 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
                 Platform.TIKTOK -> "/video/" in path || "/photo/" in path
                 Platform.INSTAGRAM -> listOf("/reel/", "/reels/", "/p/", "/tv/").any { path.startsWith(it) || "$it" in path }
                 Platform.FACEBOOK -> listOf("/watch", "/reel/", "/videos/", "/share/v/", "/share/r/").any { it in path } && (url.contains("v=") || !path.endsWith("/watch/"))
-                Platform.YOUTUBE -> "/watch" in path || "/shorts/" in path
+                Platform.YOUTUBE -> "/watch" in path || "/shorts/" in path || ("/playlist" in path && url.contains("list="))
             }
         }
     }
@@ -287,7 +287,11 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
     fun openLogin(p: Platform) { show(p); ensureWeb().loadUrl(login(p)) }
     fun goHome() { platform?.let { ensureWeb().loadUrl(home(it)) } }
     fun back(): Boolean { val w = web ?: return false; if (w.canGoBack()) { w.goBack(); return true }; return false }
-    fun pause() { web?.onPause() }
+    fun pause() {
+        // que no siga sonando un video de la web al salir de la pestaña
+        web?.evaluateJavascript("document.querySelectorAll('video,audio').forEach(function(m){m.pause()})", null)
+        web?.onPause()
+    }
     fun resume() { web?.onResume() }
 }
 

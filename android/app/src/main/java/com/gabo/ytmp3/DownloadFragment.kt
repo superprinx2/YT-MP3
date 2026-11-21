@@ -291,7 +291,7 @@ class DownloadFragment : Fragment(), BackAware {
                 Platform.TIKTOK -> R.drawable.ic_tab_note; Platform.INSTAGRAM -> R.drawable.ic_tab_camera
                 Platform.FACEBOOK -> R.drawable.ic_tab_video
             })
-            filterBtn.visibility = if (p == Platform.YOUTUBE) View.VISIBLE else View.GONE
+            filterBtn.visibility = View.GONE   // YouTube ya trae sus propios filtros
         }
         // Al volver a YouTube no mostrar lo que se bajó de otra red
         if (p == Platform.YOUTUBE && !DownloadState.running && DownloadState.items.any { it.platform != Platform.YOUTUBE }) {
@@ -337,16 +337,15 @@ class DownloadFragment : Fragment(), BackAware {
             orientation = android.widget.LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
             setPadding(ctx.dp(6), ctx.dp(8), ctx.dp(4), ctx.dp(6))
         }
-        backBtn = ctx.icon(R.drawable.ic_back, 40, label, 8).apply {
-            contentDescription = "Atrás"; visibility = View.GONE
+        // Atrás siempre visible: retrocede en la página y, si no hay a dónde, vuelve a tu biblioteca
+        backBtn = ctx.icon(R.drawable.ic_back, 44, label, 9).apply {
+            contentDescription = "Atrás"
+            background = oval(fieldBg)
             setOnClickListener { it.haptic(); goBack() }
         }
-        searchRow.addView(backBtn)
-        logoBadge = android.widget.ImageView(ctx).apply {
-            setPadding(ctx.dp(7), ctx.dp(7), ctx.dp(7), ctx.dp(7))
-            setOnClickListener { it.haptic(); it.bounce(); goHome() }
-        }
-        searchRow.addView(logoBadge, lp(ctx.dp(38), ctx.dp(30)).apply { marginStart = ctx.dp(6); marginEnd = ctx.dp(8) })
+        searchRow.addView(backBtn, lp(ctx.dp(44), ctx.dp(44)).apply { marginEnd = ctx.dp(8) })
+        // (el logo de la red ya está en la fila de redes: no se repite arriba)
+        logoBadge = android.widget.ImageView(ctx)
         val pillBox = android.widget.LinearLayout(ctx).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
             background = roundRect(fieldBg, ctx.dp(22).toFloat()); setPadding(ctx.dp(16), 0, ctx.dp(4), 0)
@@ -519,7 +518,8 @@ class DownloadFragment : Fragment(), BackAware {
         h.urlInput.imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_GO
     }
 
-    private val isWebPlatform get() = prefs.platform != Platform.YOUTUBE
+    /** Todas las redes, YouTube incluido, se navegan con su propia web dentro de la app. */
+    private val isWebPlatform get() = true
     private val webVisible get() = ::web.isInitialized && isWebPlatform && !showingResults
 
     private fun updateMode() {
@@ -540,10 +540,13 @@ class DownloadFragment : Fragment(), BackAware {
     private fun updateBack() {
         if (!::backBtn.isInitialized) return
         val can = (webVisible && web.canGoBack()) || (isWebPlatform && showingResults) || (!isWebPlatform && ytQuery != null)
-        backBtn.visibility = if (can) View.VISIBLE else View.GONE
+        backBtn.contentDescription = if (can) "Atrás" else "Volver a tu biblioteca"
     }
 
-    private fun goBack() { if (!onBack() && webVisible) web.goHome(); updateBack() }
+    private fun goBack() {
+        if (!onBack()) (activity as? MainActivity)?.selectTab(1)
+        updateBack()
+    }
 
     private fun goHome() {
         if (isWebPlatform) { showingResults = false; updateMode(); web.goHome() }
@@ -587,8 +590,7 @@ class DownloadFragment : Fragment(), BackAware {
 
     private fun login() {
         val p = prefs.platform
-        if (p == Platform.YOUTUBE) openVerify(p)
-        else { showingResults = false; updateMode(); web.openLogin(p) }
+        showingResults = false; updateMode(); web.openLogin(p)
     }
 
     override fun onBack(): Boolean {
@@ -614,7 +616,7 @@ class DownloadFragment : Fragment(), BackAware {
     /** Búsqueda propia en YouTube (sin anuncios): solo contenido descargable. */
     private fun search(q: String?, feed: String? = null) {
         if (analyzing || DownloadState.running) return
-        if (prefs.platform != Platform.YOUTUBE) {
+        if (isWebPlatform) {
             if (q != null) { showingResults = false; updateMode(); web.search(prefs.platform, q) }
             return
         }

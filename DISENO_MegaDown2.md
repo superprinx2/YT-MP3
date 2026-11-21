@@ -99,3 +99,8 @@ DJ desde playlist y desde canción).
 - Las réplicas web terminan arriba de la barrita inferior: su menú (p. ej. "Tu biblioteca" de Spotify) ya no queda tapado.
 - Spotify en modo escritorio (agente de navegador de PC + zoom): su web móvil bloquea la biblioteca y pide la app.
 - Enlace copiado (Compartir → Copiar enlace) → aviso "Descargar" al abrir la pestaña.
+
+## v2.7
+- Descargar: atrás siempre visible arriba a la izquierda (retrocede en la página o vuelve a la Biblioteca); sin el logo repetido.
+- YouTube ahora es su web móvil dentro de la app (explorar, tus playlists, buscar con miniaturas, iniciar sesión);
+  botón "Descargar" en videos, shorts y playlists. Al salir de la pestaña se pausa el video de la web.
