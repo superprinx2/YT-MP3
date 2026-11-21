@@ -247,10 +247,22 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
         pill.text = if (p == Platform.SPOTIFY) "⬇  Descargar canciones" else "⬇  Descargar"
     }
 
+    private val mobileUa by lazy { android.webkit.WebSettings.getDefaultUserAgent(ctx) }
+    private val desktopUa = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+    /** Spotify en su versión de computadora (la de celular bloquea "Tu biblioteca" y pide su app). */
+    private fun applyUa(w: WebView, p: Platform) {
+        val desk = p == Platform.SPOTIFY
+        val ua = if (desk) desktopUa else mobileUa
+        if (w.settings.userAgentString != ua) w.settings.userAgentString = ua
+        w.settings.setSupportZoom(desk); w.settings.builtInZoomControls = desk; w.settings.displayZoomControls = false
+    }
+
     fun show(p: Platform) {
         val w = ensureWeb()
         if (platform == p) return
         platform = p
+        applyUa(w, p)
         field.setText("")
         field.hint = "Buscar en ${p.label} o pegar un enlace"
         pill.visibility = View.GONE

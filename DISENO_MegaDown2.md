@@ -93,3 +93,9 @@ DJ desde playlist y desde canción).
   las mezclas. Técnicas inspiradas en AudiOrbits, código propio. Calidad según el modo de uso.
 - Modo DJ: solo el disco (sin barra) y partes de canción más largas (50 s a 3 min 20 s).
 - Spotify en Descargar: se concede "contenido protegido" (DRM) a la réplica: ya no sale "Reproductor deshabilitado".
+
+## v2.6
+- Descargar: lupa en lugar del micrófono (busca, o abre el teclado si está vacío).
+- Las réplicas web terminan arriba de la barrita inferior: su menú (p. ej. "Tu biblioteca" de Spotify) ya no queda tapado.
+- Spotify en modo escritorio (agente de navegador de PC + zoom): su web móvil bloquea la biblioteca y pide la app.
+- Enlace copiado (Compartir → Copiar enlace) → aviso "Descargar" al abrir la pestaña.

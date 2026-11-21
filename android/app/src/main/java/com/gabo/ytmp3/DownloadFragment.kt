@@ -204,6 +204,23 @@ class DownloadFragment : Fragment(), BackAware {
     override fun onResume() {
         super.onResume()
         showHero()
+        b.root.postDelayed({ offerClipboard() }, 400)
+    }
+
+    private var offeredUrl: String? = null
+
+    /** Si copiaste un enlace (por ejemplo "Compartir → Copiar enlace" en Spotify), ofrecer descargarlo. */
+    private fun offerClipboard() {
+        if (!isAdded || isHidden || DownloadState.running || analyzing) return
+        val clip = runCatching { ctx.getSystemService(ClipboardManager::class.java).primaryClip }.getOrNull()
+        val url = Util.extractUrl(clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString()) ?: return
+        if (url == offeredUrl || Platform.detect(url) == null) return
+        offeredUrl = url
+        val p = Platform.detect(url)!!
+        val bar = com.google.android.material.snackbar.Snackbar.make(b.root, "Enlace de ${p.label} copiado", 8000)
+        bar.setAction("Descargar") { it.haptic(); fromWeb = true; analyze(url) }
+        bar.setActionTextColor(BRAND_RED)
+        bar.show()
     }
 
     override fun onPause() {
@@ -356,10 +373,16 @@ class DownloadFragment : Fragment(), BackAware {
         }
         pillBox.addView(filterBtn)
         searchRow.addView(pillBox, lp(0, ctx.dp(44), 1f))
-        searchRow.addView(ctx.icon(R.drawable.ic_mic, 44, label, 10).apply {
-            contentDescription = "Buscar por voz"
+        searchRow.addView(ctx.icon(R.drawable.ic_search, 44, label, 11).apply {
+            contentDescription = "Buscar"
             background = oval(fieldBg)
-            setOnClickListener { it.haptic(); listen() }
+            setOnClickListener {
+                it.haptic()
+                if (h.urlInput.text.isNullOrBlank()) {
+                    h.urlInput.requestFocus()
+                    ctx.getSystemService(InputMethodManager::class.java).showSoftInput(h.urlInput, 0)
+                } else analyze()
+            }
         }, lp(ctx.dp(44), ctx.dp(44)).apply { marginStart = ctx.dp(8) })
         searchRow.addView(ctx.icon(R.drawable.ic_dots_v, 40, label, 8).apply {
             contentDescription = "Más opciones"
@@ -456,7 +479,10 @@ class DownloadFragment : Fragment(), BackAware {
             // En las redes la página ocupa todo: el formato se elige en la hoja de guardar
             panelBox.visibility = View.GONE; pill.visibility = View.GONE
             web.view.translationY = 0f
-            (web.view.layoutParams as android.widget.FrameLayout.LayoutParams).let { if (it.bottomMargin != 0) { it.bottomMargin = 0; web.view.requestLayout() } }
+            val nb = androidx.core.view.ViewCompat.getRootWindowInsets(b.root)
+                ?.getInsets(androidx.core.view.WindowInsetsCompat.Type.navigationBars())?.bottom ?: 0
+            val want = ctx.dp(30) + nb
+            (web.view.layoutParams as android.widget.FrameLayout.LayoutParams).let { if (it.bottomMargin != want) { it.bottomMargin = want; web.view.requestLayout() } }
             return
         }
         if (panelBox.visibility != View.VISIBLE) panelBox.visibility = View.VISIBLE
@@ -576,7 +602,7 @@ class DownloadFragment : Fragment(), BackAware {
 
     override fun onHiddenChanged(hidden: Boolean) {
         super.onHiddenChanged(hidden)
-        if (hidden) { stopPreview(); if (::web.isInitialized) web.pause() } else updateMode()
+        if (hidden) { stopPreview(); if (::web.isInitialized) web.pause() } else { updateMode(); b.root.postDelayed({ offerClipboard() }, 400) }
     }
 
     /** Inicio de la réplica de YouTube: lo recomendado para ti (si iniciaste sesión) o tendencias. */
