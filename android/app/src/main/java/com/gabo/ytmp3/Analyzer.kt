@@ -41,6 +41,8 @@ import kotlin.math.sqrt
 object Analyzer {
     private const val TAG = "DSAnalyzer"
     private const val TARGET_DB = -17f
+    /** Solo se escuchan los primeros 12 minutos (los mixes de horas llenaban la memoria y cerraban la app). */
+    private const val MAX_US = 12L * 60 * 1_000_000
     /** Versión del análisis: al subirla, las canciones se vuelven a analizar en segundo plano. */
     const val VER = 2
     private var job: Job? = null
@@ -72,6 +74,14 @@ object Analyzer {
         if (job?.isActive == true) return
         job = App.scope.launch {
             val dao = Library.dao(app)
+            // Si la app se cerró mientras analizaba una canción, esa canción se salta para siempre
+            val sp = app.getSharedPreferences("analyzer", Context.MODE_PRIVATE)
+            val busy = sp.getLong("busy", 0L)
+            if (busy != 0L) {
+                runCatching { dao.track(busy)?.let { dao.updateTrack(it.copy(analyzed = 2, gainDb = it.gainDb ?: 0f)) } }
+                sp.edit().putLong("busy", 0L).commit()
+                BlackBox.log(app, "análisis saltado: la canción $busy cerró la app la vez anterior")
+            }
             var done = 0
             var hot = 0
             while (true) {
@@ -99,9 +109,13 @@ object Analyzer {
 
     suspend fun analyzeAndSave(ctx: Context, t: Track) {
         val dao = Library.dao(ctx)
+        val sp = ctx.applicationContext.getSharedPreferences("analyzer", Context.MODE_PRIVATE)
+        sp.edit().putLong("busy", t.id).commit()
         val r = withContext(dispatcher) {
-            runCatching { analyze(ctx, t.audioUri()) }.onFailure { Log.w(TAG, "analyze ${t.title}", it) }.getOrNull()
+            try { analyze(ctx, t.audioUri()) }
+            catch (e: Throwable) { Log.w(TAG, "analyze ${t.title}", e); BlackBox.log(ctx, "no se pudo analizar «${t.title.take(40)}»: ${e.javaClass.simpleName}"); null }
         }
+        sp.edit().putLong("busy", 0L).apply()
         val cur = dao.track(t.id) ?: return
         val upd = if (r == null) cur.copy(analyzed = 2, gainDb = cur.gainDb ?: 0f) else cur.copy(
             analyzed = 1, anaVer = VER, gainDb = r.gainDb, bpm = r.bpm, climaxMs = r.climaxMs, introMs = r.introMs, outroMs = r.outroMs,
@@ -187,13 +201,16 @@ object Analyzer {
             var n16 = 0
             var dec = rate / 16000.0; var decAcc = 0.0; var decSum = 0f; var decN = 0
             var inDone = false
+            var capped = false
+            val realDurMs = if (fmt.containsKey(MediaFormat.KEY_DURATION)) fmt.getLong(MediaFormat.KEY_DURATION) / 1000 else 0L
             try {
                 loop@ while (true) {
                     if (!inDone) {
                         val ii = codec.dequeueInputBuffer(5000)
                         if (ii >= 0) {
                             val size = ex.readSampleData(codec.getInputBuffer(ii)!!, 0)
-                            if (size < 0) { codec.queueInputBuffer(ii, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM); inDone = true }
+                            if (size >= 0 && ex.sampleTime > MAX_US) capped = true
+                            if (size < 0 || capped) { codec.queueInputBuffer(ii, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM); inDone = true }
                             else { codec.queueInputBuffer(ii, 0, size, ex.sampleTime, 0); ex.advance() }
                         }
                     }
@@ -230,7 +247,8 @@ object Analyzer {
                         decSum += s; decN++; decAcc += 1.0
                         if (decAcc >= dec) {
                             decAcc -= dec
-                            if (n16 >= pcm16.size) pcm16 = pcm16.copyOf(pcm16.size * 2)
+                            if (n16 >= pcm16.size) pcm16 = pcm16.copyOf(minOf(pcm16.size * 2, 16000 * 60 * 13))
+                            if (n16 >= pcm16.size) continue
                             pcm16[n16++] = ((decSum / decN).coerceIn(-1f, 1f) * 32767).toInt().toShort()
                             decSum = 0f; decN = 0
                         }
@@ -359,8 +377,8 @@ object Analyzer {
             val sections = runCatching { sectionsOf(chroma, rms, nf, fps, beatMs, 60000.0 / bpm, durationMs) }
                 .onFailure { Log.w(TAG, "sections", it) }.getOrDefault("")
 
-            return Result(gain, bpm, (climax * msPerFrame).toLong(), introMs, outroMs, energy, bright, tags, env,
-                gaps.joinToString(","), durationMs, keyCam, beatMs, sections)
+            return Result(gain, bpm, (climax * msPerFrame).toLong(), introMs, if (capped) 0L else outroMs, energy, bright, tags, env,
+                gaps.joinToString(","), if (capped && realDurMs > 0) realDurMs else durationMs, keyCam, beatMs, sections)
         } finally { ex.release() }
     }
 

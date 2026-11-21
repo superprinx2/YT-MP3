@@ -12,7 +12,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-class App : Application() {
+class App : Application(), coil.ImageLoaderFactory {
+
+    /**
+     * Portadas en bitmaps normales (no de "hardware"): la barra de cristal (BlurView) dibuja la pantalla por
+     * software y los bitmaps de hardware la hacían cerrarse ("Software rendering doesn't support hardware bitmaps").
+     */
+    override fun newImageLoader(): coil.ImageLoader = coil.ImageLoader.Builder(this).allowHardware(false).crossfade(true).build()
+
 
     companion object {
         const val CHANNEL_PROGRESS = "progress"
@@ -40,7 +47,22 @@ class App : Application() {
         instance = this
         Prefs2.applyTheme(this)
         createChannels()
-        Analyzer.kick(this)
+        // Registro de errores: si la app se cierra, se guarda el detalle para enviarlo después
+        val prev = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { th, e ->
+            runCatching {
+                val sw = java.io.StringWriter(); e.printStackTrace(java.io.PrintWriter(sw))
+                java.io.File(filesDir, "crash_last.txt").writeText("Hilo: ${th.name}\n$sw")
+                BlackBox.log(this, "la app se cerró: ${e.javaClass.simpleName}: ${e.message?.take(120)}")
+            }
+            prev?.uncaughtException(th, e)
+        }
+        // Modo seguro: si se cerró 2 veces seguidas al arrancar, esta vez no se analiza nada
+        val boot = getSharedPreferences("boot", MODE_PRIVATE)
+        val fails = boot.getInt("fails", 0)
+        boot.edit().putInt("fails", fails + 1).commit()
+        if (fails >= 2) BlackBox.log(this, "modo seguro: análisis en pausa en este inicio")
+        else Analyzer.kick(this)
         scope.launch {
             try {
                 Updater.prepareBundled(this@App)

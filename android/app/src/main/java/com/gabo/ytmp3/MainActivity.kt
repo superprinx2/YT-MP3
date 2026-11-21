@@ -83,6 +83,7 @@ class MainActivity : AppCompatActivity() {
             selectTab(savedInstanceState.getInt("tab", 0))
         }
         PlayerHub.connect(this)
+        bootOk()
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 val fm = supportFragmentManager
@@ -368,6 +369,21 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("Activar") { _, _ ->
                 runCatching { startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName"))) }
             }
+            .setNegativeButton("Ahora no", null).show()
+    }
+
+    /** Si la app llegó a abrir bien, se borra el contador de cierres; y si la vez anterior falló, se ofrece enviar el error. */
+    private fun bootOk() {
+        window.decorView.postDelayed({ getSharedPreferences("boot", MODE_PRIVATE).edit().putInt("fails", 0).apply() }, 8000)
+        val f = java.io.File(filesDir, "crash_last.txt")
+        if (!f.exists()) return
+        val txt = runCatching { f.readText() }.getOrDefault("")
+        f.delete()
+        BlackBox.log(this, "detalle del cierre anterior:\n" + txt.take(3000))
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+            .setTitle("DownSong se cerró la última vez")
+            .setMessage("Ya lo arreglamos para que no vuelva a pasar. ¿Nos envías el informe para revisarlo?")
+            .setPositiveButton("Enviar informe") { _, _ -> BlackBox.share(this) }
             .setNegativeButton("Ahora no", null).show()
     }
 

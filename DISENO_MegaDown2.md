@@ -111,3 +111,11 @@ DJ desde playlist y desde canción).
 - Cada red recuerda solo direcciones de su propio sitio (ya no aparece TikTok al cambiar a YouTube/Spotify).
 - La tarjeta "¡Listo!" de descargas se oculta sola (6 s; 15 s si hubo errores) o al tocarla.
 - Enlaces pegados en cualquier red: hoja de guardar encima, sin salir de la red.
+
+## v2.9 (arreglo de cierre al abrir)
+- Causa: Coil cargaba portadas como bitmaps de hardware y la barra de cristal (BlurView) dibuja por software →
+  "Software rendering doesn't support hardware bitmaps". Con portadas reales (descargas de Spotify) la app se cerraba
+  al abrir Inicio. Arreglo: ImageLoader global con allowHardware(false).
+- Analizador: máximo 12 minutos por archivo (los mixes de horas llenaban la memoria), canción que cierra la app se salta,
+  modo seguro tras 2 cierres seguidos al arrancar.
+- Registro de errores: detalle del cierre guardado y aviso para enviarlo en el siguiente inicio.
