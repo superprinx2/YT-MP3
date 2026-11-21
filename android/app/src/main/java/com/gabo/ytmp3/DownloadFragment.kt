@@ -141,6 +141,7 @@ class DownloadFragment : Fragment(), BackAware {
         b.btnDownload.setOnClickListener { it.haptic(true); startDownload() }
         pressScale(b.btnDownload, b.downloadFrame)
         b.btnCancel.setOnClickListener { it.haptic(); confirmCancel() }
+        b.progressCard.setOnClickListener { if (!DownloadState.running) { it.haptic(); dismissDone() } }
         b.verifyBanner.setOnClickListener { it.haptic(); openVerify(DownloadState.verifyPlatform) }
         h.btnClear.setOnClickListener {
             it.haptic()
@@ -307,7 +308,7 @@ class DownloadFragment : Fragment(), BackAware {
                     "Si Instagram pidiera iniciar sesión, te avisaremos."
                 Platform.FACEBOOK -> "Videos y reels públicos de Facebook en MP4 o MP3. También funciona «Compartir» desde Facebook."
                 Platform.SPOTIFY -> "Playlists, álbumes y canciones de Spotify en MP3: la app lee la lista y baja cada canción " +
-                    "desde YouTube (Spotify no permite bajar su audio). Hasta ${SpotifySource.MAX_TRACKS} canciones por enlace."
+                    "desde YouTube (Spotify no permite bajar su audio). Playlists completas, sin límite de 100."
             }
         }
         // Spotify: solo MP3
@@ -400,9 +401,15 @@ class DownloadFragment : Fragment(), BackAware {
         column.removeView(b.list)
         column.addView(stage, listIdx, lp(MATCH, 0, 1f))
         stage.addView(b.list, android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
-        web = WebReplica(ctx) { _, url ->
+        web = WebReplica(ctx) { p, url ->
             // Se descarga sin salir de la red: la hoja de guardar aparece encima
-            fromWeb = true; analyze(url)
+            fromWeb = true
+            if (p == Platform.SPOTIFY && (url.contains("/playlist/") || url.contains("/album/")) && !DownloadState.running) {
+                // la playlist entera (no solo 100): se lee de la página que estás viendo
+                web.collectSpotify { title, list ->
+                    if (list.size >= 2) presentList(title.ifBlank { "Spotify" }, list) else analyze(url)
+                }
+            } else analyze(url)
         }
         web.onNav = { updateBack() }
         web.hideField()
@@ -789,6 +796,20 @@ class DownloadFragment : Fragment(), BackAware {
         }
     }
 
+    /** Muestra una lista ya armada (p. ej. la playlist completa de Spotify) y abre la hoja de guardar. */
+    private fun presentList(title: String, list: List<VideoItem>) {
+        if (DownloadState.running) return
+        list.forEach { it.checked = true }
+        DownloadState.items.clear(); DownloadState.items.addAll(list)
+        DownloadState.listTitle = title; DownloadState.isPlaylist = true
+        DownloadState.finishedMessage = null; DownloadState.totalCount = 0
+        fromSearch = false
+        if (prefs.format != Format.MP3) setFormat(Format.MP3)
+        adapter.notifyDataSetChanged()
+        render()
+        pickTargets(confirm = true, title = "«$title» · ${list.size} canciones")
+    }
+
     /** Arriba de la hoja: formato (MP3/MP4) y "guardar también en el celular". */
     private fun downloadOptions(confirm: Boolean): View {
         val label = ctx.col(R.color.ios_label); val sec = ctx.col(R.color.ios_secondary)
@@ -922,6 +943,14 @@ class DownloadFragment : Fragment(), BackAware {
                 DownloadState.finishedMessage = null
                 DownloadState.totalCount = 0
                 if (list.isEmpty()) throw IllegalStateException("ERROR: no se encontraron videos en ese enlace")
+                // Spotify da solo 100 por enlace: se abre la playlist en la pestaña Spotify y se lee completa
+                if (platform == Platform.SPOTIFY && isPlaylist && list.size >= SpotifySource.MAX_TRACKS) {
+                    if (prefs.platform != Platform.SPOTIFY) setPlatform(Platform.SPOTIFY)
+                    showingResults = false; updateMode()
+                    toast("Tu playlist tiene más de 100: leyendo la lista completa…")
+                    web.openAndCollect(url) { t, l -> presentList(if (l.size > list.size) t.ifBlank { title } else title, if (l.size > list.size) l else list) }
+                    return@launch
+                }
                 h.infoText.text = when {
                     !isPlaylist -> ""
                     platform == Platform.SPOTIFY && list.size >= SpotifySource.MAX_TRACKS ->
@@ -932,8 +961,8 @@ class DownloadFragment : Fragment(), BackAware {
                 h.infoText.visibility = if (isPlaylist) View.VISIBLE else View.GONE
                 h.listTitle.text = if (isPlaylist) "${list.size} ${noun()}" else noun(1)
                 adapter.notifyDataSetChanged()
-                if (fromWeb) {
-                    // desde TikTok, Instagram, Facebook o Spotify: todo marcado y la hoja de guardar encima
+                if (fromWeb || isWebPlatform) {
+                    // todo marcado y la hoja de guardar encima (sin salir de la red)
                     list.forEach { it.checked = true }
                     pickTargets(confirm = true, title = if (isPlaylist) "«$title» · ${list.size} ${noun()}" else list.first().title)
                 } else b.downloadFrame.postDelayed({ b.downloadFrame.bounce() }, 150)
@@ -1132,6 +1161,11 @@ class DownloadFragment : Fragment(), BackAware {
             b.progressCard.visibility = View.GONE
         }
 
+        if (!running && s.finishedMessage != null && hideDoneAt == 0L) {
+            hideDoneAt = System.currentTimeMillis()
+            b.progressCard.postDelayed(hideDone, if (s.errorCount > 0) 15_000 else 6_000)
+        }
+        if (running) { hideDoneAt = 0L; b.progressCard.removeCallbacks(hideDone) }
         if (s.celebrate) {
             s.celebrate = false
             b.confetti.burst()
@@ -1139,6 +1173,17 @@ class DownloadFragment : Fragment(), BackAware {
             showHero()
             (activity as? MainActivity)?.refreshLibrary()
         }
+    }
+
+    private var hideDoneAt = 0L
+    private val hideDone = Runnable { dismissDone() }
+
+    /** Quita la tarjeta de descargas terminadas. */
+    private fun dismissDone() {
+        if (DownloadState.running || !isAdded) return
+        DownloadState.finishedMessage = null
+        hideDoneAt = 0L
+        render()
     }
 
     private fun toast(s: String) = Toast.makeText(ctx, s, Toast.LENGTH_LONG).show()

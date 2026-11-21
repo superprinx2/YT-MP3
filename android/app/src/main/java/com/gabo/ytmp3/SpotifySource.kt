@@ -97,7 +97,7 @@ object SpotifySource {
         return Triple(name, true, items)
     }
 
-    private fun track(id: String, title: String, artists: String, durMs: Long, cover: String?): VideoItem {
+    fun track(id: String, title: String, artists: String, durMs: Long, cover: String?): VideoItem {
         // Spotify separa artistas con espacios "no separables" (U+00A0): normalizarlos.
         @Suppress("NAME_SHADOWING") val artists = artists.replace('\u00A0', ' ')
         @Suppress("NAME_SHADOWING") val title = title.replace('\u00A0', ' ')

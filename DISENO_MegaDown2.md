@@ -104,3 +104,10 @@ DJ desde playlist y desde canción).
 - Descargar: atrás siempre visible arriba a la izquierda (retrocede en la página o vuelve a la Biblioteca); sin el logo repetido.
 - YouTube ahora es su web móvil dentro de la app (explorar, tus playlists, buscar con miniaturas, iniciar sesión);
   botón "Descargar" en videos, shorts y playlists. Al salir de la pestaña se pausa el video de la web.
+
+## v2.8
+- Spotify sin límite de 100: la playlist/álbum se lee completa desde la réplica (la página baja sola y se toman
+  todas las filas). Si se pega un enlace con 100+, se abre en la pestaña Spotify y se lee entera. Portada por canción.
+- Cada red recuerda solo direcciones de su propio sitio (ya no aparece TikTok al cambiar a YouTube/Spotify).
+- La tarjeta "¡Listo!" de descargas se oculta sola (6 s; 15 s si hubo errores) o al tocarla.
+- Enlaces pegados en cualquier red: hoja de guardar encima, sin salir de la red.

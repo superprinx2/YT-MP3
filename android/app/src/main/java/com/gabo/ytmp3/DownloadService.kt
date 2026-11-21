@@ -641,11 +641,11 @@ class DownloadService : Service() {
         val audio = move(mp3, "audio", "mp3")
         val video = move(mp4, "video", "mp4")
         var cover = move(jpg, "covers", "jpg")
-        if (item.platform == Platform.SPOTIFY && item.thumbUrl != null) {
+        if (item.platform == Platform.SPOTIFY) {
             runCatching {
                 val f = File(Library.dir(this, "covers"), "$safe.jpg")
                 // la portada de esta canción (no la de la playlist)
-                val url = SpotifySource.trackCover(item.id) ?: item.thumbUrl
+                val url = SpotifySource.trackCover(item.id) ?: item.thumbUrl ?: error("sin portada")
                 java.net.URL(url).openStream().use { i -> f.outputStream().use { i.copyTo(it) } }
                 cover = f
             }

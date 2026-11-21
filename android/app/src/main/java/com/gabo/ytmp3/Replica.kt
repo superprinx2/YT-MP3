@@ -174,6 +174,37 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
     }
 
     companion object {
+        private const val SPOTIFY_JS = """(function(){
+  var seen={}, order=[], stable=0, last=-1, tries=0;
+  function grab(){
+    document.querySelectorAll('[data-testid="tracklist-row"]').forEach(function(r){
+      var a=r.querySelector('a[href*="/track/"]'); if(!a) return;
+      var id=a.getAttribute('href').split('/track/')[1].split('?')[0];
+      if(seen[id]) return;
+      var arts=[].map.call(r.querySelectorAll('a[href*="/artist/"]'),function(x){return x.textContent.trim();});
+      var m=(r.textContent.match(/\b\d{1,2}:\d{2}\b/g)||[]); var dur=0;
+      if(m.length){ var p=m[m.length-1].split(':'); dur=(parseInt(p[0])*60+parseInt(p[1]))*1000; }
+      seen[id]=1; order.push({id:id,title:a.textContent.trim(),artists:arts.join(', '),dur:dur});
+    });
+  }
+  function step(){
+    grab();
+    var rows=document.querySelectorAll('[data-testid="tracklist-row"]');
+    if(rows.length){ rows[rows.length-1].scrollIntoView({block:'end'}); }
+    if(order.length===last){ stable++; } else { stable=0; last=order.length; }
+    try{ DSBridge.progress(order.length); }catch(e){}
+    tries++;
+    if((order.length>0 && stable>=7) || order.length>=2000 || tries>70){
+      var h=document.querySelector('[data-testid="entityTitle"]')||document.querySelector('main h1');
+      var t=h? h.textContent.trim() : (document.title||'Spotify').split(' | ')[0];
+      DSBridge.done(JSON.stringify(order), t);
+      return;
+    }
+    setTimeout(step, 450);
+  }
+  step();
+})();"""
+
         fun home(p: Platform) = when (p) {
             Platform.SPOTIFY -> "https://open.spotify.com/"
             Platform.TIKTOK -> "https://www.tiktok.com/"
@@ -215,10 +246,18 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
                 return s != "http" && s != "https"   // no abrir otras apps (intent://, spotify:, etc.)
             }
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) { bar.visibility = View.VISIBLE; check(url) }
-            override fun onPageFinished(view: WebView, url: String?) { bar.visibility = View.GONE; check(url) }
+            override fun onPageFinished(view: WebView, url: String?) {
+                bar.visibility = View.GONE; check(url)
+                val cb = pendingCollect
+                if (cb != null && url != null && (url.contains("/playlist/") || url.contains("/album/"))) {
+                    pendingCollect = null
+                    view.postDelayed({ collectSpotify(cb) }, 1500)
+                }
+            }
             override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) { check(url) }
         }
         w.setOnScrollChangeListener { _, _, y, _, oy -> onScroll?.invoke(y, oy) }
+        w.addJavascriptInterface(Bridge(), "DSBridge")
         w.webChromeClient = object : android.webkit.WebChromeClient() {
             override fun onProgressChanged(view: WebView, p: Int) { bar.progress = p }
             // Spotify (y otros) piden "contenido protegido" (DRM Widevine) para su reproductor web:
@@ -237,9 +276,22 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
     var onNav: (() -> Unit)? = null
     fun canGoBack() = web?.canGoBack() == true
 
+    /** ¿La dirección es del sitio de esa red? (para no guardar una página de TikTok como "la de YouTube"). */
+    private fun belongs(p: Platform, url: String): Boolean {
+        val host = runCatching { Uri.parse(url).host }.getOrNull()?.lowercase() ?: return false
+        val doms = when (p) {
+            Platform.YOUTUBE -> listOf("youtube.com", "youtu.be")
+            Platform.SPOTIFY -> listOf("spotify.com")
+            Platform.TIKTOK -> listOf("tiktok.com")
+            Platform.INSTAGRAM -> listOf("instagram.com")
+            Platform.FACEBOOK -> listOf("facebook.com", "fb.watch")
+        }
+        return doms.any { host == it || host.endsWith(".$it") }
+    }
+
     private fun check(url: String?) {
         val p = platform ?: return
-        if (url != null) lastUrl[p] = url
+        if (url != null && belongs(p, url)) lastUrl[p] = url
         onNav?.invoke()
         val ok = downloadable(p, url)
         if (ok && pill.visibility != View.VISIBLE) { pill.visibility = View.VISIBLE; pill.bounce() }
@@ -263,13 +315,57 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
         if (platform == p) return
         platform = p
         applyUa(w, p)
+        w.stopLoading()
         field.setText("")
         field.hint = "Buscar en ${p.label} o pegar un enlace"
         pill.visibility = View.GONE
-        w.loadUrl(lastUrl[p] ?: home(p))
+        w.loadUrl(lastUrl[p]?.takeIf { belongs(p, it) } ?: home(p))
     }
 
     var onScroll: ((Int, Int) -> Unit)? = null
+
+    // ------------------------------------------------------------------ playlists de Spotify completas
+    private var spotifyCb: ((String, List<VideoItem>) -> Unit)? = null
+
+    private inner class Bridge {
+        @android.webkit.JavascriptInterface fun progress(n: Int) {
+            pill.post { pill.text = "Leyendo playlist… $n canciones" }
+        }
+        @android.webkit.JavascriptInterface fun done(json: String, title: String) {
+            val items = runCatching {
+                val arr = org.json.JSONArray(json)
+                (0 until arr.length()).map { i ->
+                    val o = arr.getJSONObject(i)
+                    SpotifySource.track(o.getString("id"), o.getString("title"), o.optString("artists"), o.optLong("dur"), null)
+                }
+            }.getOrDefault(emptyList())
+            pill.post {
+                pill.text = "⬇  Descargar canciones"
+                val cb = spotifyCb; spotifyCb = null
+                cb?.invoke(title, items)
+            }
+        }
+    }
+
+    /**
+     * Lee TODAS las canciones de la playlist o álbum de Spotify abierto (la página baja sola hasta el final).
+     * La versión "embed" de Spotify solo da 100; así salen las 189, 500… que tenga.
+     */
+    private var pendingCollect: ((String, List<VideoItem>) -> Unit)? = null
+
+    /** Abre una playlist o álbum de Spotify y, cuando carga, lee todas sus canciones. */
+    fun openAndCollect(url: String, cb: (String, List<VideoItem>) -> Unit) {
+        show(Platform.SPOTIFY)
+        pendingCollect = cb
+        ensureWeb().loadUrl(url)
+    }
+
+    fun collectSpotify(cb: (String, List<VideoItem>) -> Unit) {
+        val w = web ?: return cb("", emptyList())
+        spotifyCb = cb
+        pill.text = "Leyendo playlist…"
+        w.evaluateJavascript(SPOTIFY_JS, null)
+    }
     fun hideField() { field.visibility = View.GONE }
 
     fun search(p: Platform, q: String) {
