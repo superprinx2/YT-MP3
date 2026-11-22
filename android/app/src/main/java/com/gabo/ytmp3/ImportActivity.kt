@@ -68,7 +68,10 @@ class ImportActivity : AppCompatActivity() {
     private lateinit var allBtn: TextView
     private lateinit var crumb: TextView
     private lateinit var tabs: List<TextView>
-    private val thumbs = LruCache<Long, Bitmap>(200)
+    /** Miniaturas en memoria con tope de 16 MB (antes eran 200 imágenes de cualquier tamaño: con carpetas grandes se acababa la memoria). */
+    private val thumbs = object : LruCache<Long, Bitmap>(16 * 1024 * 1024) {
+        override fun sizeOf(key: Long, value: Bitmap) = value.byteCount
+    }
     private var plName = "tu biblioteca"
 
     private sealed class Item {
@@ -222,9 +225,16 @@ class ImportActivity : AppCompatActivity() {
         if (pick.isEmpty()) return
         val go = { ids: Set<Long> ->
             lifecycleScope.launch {
-                addBtn.text = "Agregando…"
-                val tids = withContext(Dispatchers.IO) { Library.importLocal(this@ImportActivity, pick) }
-                Library.addToPlaylists(this@ImportActivity, tids, ids)
+                addBtn.text = "Agregando…"; addBtn.isEnabled = false
+                val tids = try {
+                    withContext(Dispatchers.IO) {
+                        Library.importLocal(this@ImportActivity, pick).also { Library.addToPlaylists(this@ImportActivity, it, ids) }
+                    }
+                } catch (e: Throwable) {
+                    BlackBox.log(this@ImportActivity, "no se pudo agregar música: ${e.javaClass.simpleName}: ${e.message?.take(120)}")
+                    Toast.makeText(this@ImportActivity, "No se pudieron agregar algunas canciones. Prueba con menos a la vez.", Toast.LENGTH_LONG).show()
+                    addBtn.isEnabled = true; refreshBar(); return@launch
+                }
                 addBtn.text = "✓ ${tids.size} agregadas"
                 addBtn.animate().scaleX(1.06f).scaleY(1.06f).setDuration(160).withEndAction {
                     addBtn.animate().scaleX(1f).scaleY(1f).setDuration(160).withEndAction { finish() }.start()
@@ -251,11 +261,20 @@ class ImportActivity : AppCompatActivity() {
                     if (Build.VERSION.SDK_INT >= 29) contentResolver.loadThumbnail(s.uri, Size(200, 200), null)
                     else contentResolver.openInputStream(android.net.Uri.parse("content://media/external/audio/albumart/${s.albumId}"))
                         ?.use { android.graphics.BitmapFactory.decodeStream(it) }
-                }.getOrNull()
+                }.getOrNull()?.let { small(it) }
             }
             if (b != null) { thumbs.put(s.id, b); if (iv.tag == s.id) iv.setImageBitmap(b) }
             else if (iv.tag == s.id) iv.setImageBitmap(KaleidoRenderer.bitmap(s.id, 96))
         }
+    }
+
+    /** Algunos celulares devuelven la carátula original (1000 px o más) aunque se pida 200: se achica. */
+    private fun small(b: Bitmap): Bitmap {
+        val m = maxOf(b.width, b.height)
+        if (m <= 220) return b
+        val k = 200f / m
+        return Bitmap.createScaledBitmap(b, (b.width * k).toInt().coerceAtLeast(1), (b.height * k).toInt().coerceAtLeast(1), true)
+            .also { if (it !== b) b.recycle() }
     }
 
     private inner class Adapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {

@@ -401,7 +401,8 @@ class DownloadFragment : Fragment(), BackAware {
         column.removeView(b.list)
         column.addView(stage, listIdx, lp(MATCH, 0, 1f))
         stage.addView(b.list, android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
-        web = WebReplica(ctx) { p, url ->
+        web = WebReplica(ctx) { p, rawUrl ->
+            val url = if (p == Platform.YOUTUBE) singleVideo(rawUrl) else rawUrl
             // Se descarga sin salir de la red: la hoja de guardar aparece encima
             fromWeb = true
             if (p == Platform.SPOTIFY && (url.contains("/playlist/") || url.contains("/album/")) && !DownloadState.running) {
@@ -475,7 +476,7 @@ class DownloadFragment : Fragment(), BackAware {
         // la barra de descarga deja libre la zona de los botones del sistema
         androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(b.bottomBar) { v, ins ->
             val nb = ins.getInsets(androidx.core.view.WindowInsetsCompat.Type.navigationBars()).bottom
-            v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, ctx.dp(12) + nb); ins
+            v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, ctx.dp(12) + ctx.dp(30) + nb); ins
         }
     }
 
@@ -796,6 +797,19 @@ class DownloadFragment : Fragment(), BackAware {
         }
     }
 
+    /**
+     * Un video de YouTube abierto desde un "Mix" o una lista trae "&list=..." en el enlace y yt-dlp
+     * bajaba la lista entera (cientos). En /watch y /shorts se deja solo el video.
+     */
+    private fun singleVideo(url: String): String {
+        val u = runCatching { Uri.parse(url) }.getOrNull() ?: return url
+        val path = u.path.orEmpty()
+        if (!(path.contains("/watch") || path.contains("/shorts/"))) return url
+        val v = u.getQueryParameter("v")
+        return if (path.contains("/watch") && v != null) "https://www.youtube.com/watch?v=$v"
+               else u.buildUpon().clearQuery().build().toString()
+    }
+
     /** Muestra una lista ya armada (p. ej. la playlist completa de Spotify) y abre la hoja de guardar. */
     private fun presentList(title: String, list: List<VideoItem>) {
         if (DownloadState.running) return
@@ -882,7 +896,7 @@ class DownloadFragment : Fragment(), BackAware {
         if (analyzing || DownloadState.running) { if (direct != null) toast("Espera a que termine la descarga actual"); return }
         if (direct == null) fromWeb = false
         val raw = direct ?: h.urlInput.text?.toString()?.trim().orEmpty()
-        val url = Util.extractUrl(raw)
+        val url = Util.extractUrl(raw)?.let { if (Platform.detect(it) == Platform.YOUTUBE) singleVideo(it) else it }
         if (url == null && raw.length >= 2) {
             ctx.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(h.urlInput.windowToken, 0)
             search(raw); return

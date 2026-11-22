@@ -119,3 +119,14 @@ DJ desde playlist y desde canción).
 - Analizador: máximo 12 minutos por archivo (los mixes de horas llenaban la memoria), canción que cierra la app se salta,
   modo seguro tras 2 cierres seguidos al arrancar.
 - Registro de errores: detalle del cierre guardado y aviso para enviarlo en el siguiente inicio.
+
+## v2.10
+- Playlists: botón Repetir (no → toda la playlist → una canción) y botón Ordenar (personalizado, recién añadidas,
+  título, artista, duración corta/larga, más escuchadas; se recuerda por playlist y la cola sigue ese orden).
+- Fin de la lista sin repetir: vuelve a la primera canción y queda en pausa (antes con aleatorio seguía sin fin).
+- Si 4 canciones seguidas no se pueden reproducir, se detiene en vez de saltar sin parar. Saltar silencios solo
+  recorta si el resultado es razonable (si no, la canción "terminaba" al instante y pasaba a la siguiente).
+- Agregar música del celular: miniaturas con tope de memoria (algunos celulares dan carátulas de 1000+ px) y errores
+  al agregar avisan en vez de cerrar la app.
+- Descargas: "Cancelar descarga" por encima de la barrita inferior. YouTube: un video abierto desde un Mix/lista
+  baja solo ese video. Spotify: resultados a todo el ancho y aviso de cookies cerrado.

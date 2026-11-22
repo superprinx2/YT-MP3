@@ -174,6 +174,16 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
     }
 
     companion object {
+        /** En el inicio se ve "Tu biblioteca"; en búsqueda, playlists y álbumes el contenido ocupa toda la pantalla. */
+        private const val SPOTIFY_FIT_JS = """(function(){
+  try{
+    var s=document.getElementById('ds-css');
+    if(!s){ s=document.createElement('style'); s.id='ds-css'; (document.head||document.documentElement).appendChild(s); }
+    s.textContent = (location.pathname==='/' || location.pathname==='') ? '' : '#Desktop_LeftSidebar_Id{display:none!important}';
+    var r=document.getElementById('onetrust-reject-all-handler'); if(r){ r.click(); }
+  }catch(e){}
+})();"""
+
         private const val SPOTIFY_JS = """(function(){
   var seen={}, order=[], stable=0, last=-1, tries=0;
   function grab(){
@@ -293,6 +303,10 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
         val p = platform ?: return
         if (url != null && belongs(p, url)) lastUrl[p] = url
         onNav?.invoke()
+        if (p == Platform.SPOTIFY) web?.let { w ->
+            w.evaluateJavascript(SPOTIFY_FIT_JS, null)
+            w.postDelayed({ if (platform == Platform.SPOTIFY) w.evaluateJavascript(SPOTIFY_FIT_JS, null) }, 1800)
+        }
         val ok = downloadable(p, url)
         if (ok && pill.visibility != View.VISIBLE) { pill.visibility = View.VISIBLE; pill.bounce() }
         else if (!ok) pill.visibility = View.GONE

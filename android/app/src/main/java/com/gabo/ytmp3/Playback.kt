@@ -346,6 +346,8 @@ class PlaybackService : MediaSessionService() {
     }
 
     private var saveTicks = 0
+    /** Errores seguidos de reproducción (para no saltar canciones sin fin). */
+    private var errStreak = 0
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = session
 
@@ -392,8 +394,10 @@ class PlaybackService : MediaSessionService() {
         val uri = if (showVideo && t.hasVideo) t.videoUri()!! else t.audioUri()
         val clip = MediaItem.ClippingConfiguration.Builder().apply {
             if (prefs.skipSilence && dj == null) {
-                t.introMs?.takeIf { it > 300 }?.let { setStartPositionMs(it) }
-                t.outroMs?.takeIf { it > 0 && (t.durationMs == 0L || it < t.durationMs - 500) }?.let { setEndPositionMs(it) }
+                val start = t.introMs?.takeIf { it in 301..20_000 } ?: 0L
+                val end = t.outroMs?.takeIf { it > start + 30_000 && (t.durationMs == 0L || it < t.durationMs - 500) }
+                if (start > 0 && (t.durationMs == 0L || start < t.durationMs - 30_000)) setStartPositionMs(start)
+                end?.let { setEndPositionMs(it) }
             }
         }.build()
         return MediaItem.Builder().setMediaId(t.id.toString()).setUri(uri).setClippingConfiguration(clip)
@@ -968,17 +972,28 @@ class PlaybackService : MediaSessionService() {
                 else { armed = false; handler.post { planNext(true) } }
                 return
             }
-            if (p === active && p.hasNextMediaItem()) { p.seekToNextMediaItem(); p.prepare(); p.play() }
+            if (p !== active) return
+            if (++errStreak > 3) {
+                BlackBox.log(this@PlaybackService, "varias canciones seguidas no se pudieron reproducir: se detiene")
+                errStreak = 0; p.playWhenReady = false; notifyUi(); return
+            }
+            if (p.hasNextMediaItem()) { p.seekToNextMediaItem(); p.prepare(); p.play() }
         }
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (p !== active) return
             if (playbackState == Player.STATE_ENDED && dj != null) { handler.post { djRescue("terminó la lista") }; return }
-            // Con aleatorio activado la música sigue: al terminar se vuelve a mezclar y continúa.
-            if (playbackState == Player.STATE_ENDED && p.shuffleModeEnabled && p.mediaItemCount > 1) {
-                val order = smartOrder(queue, -1)
-                for (q in listOf(p1, p2)) if (q.mediaItemCount == queue.size) q.setShuffleOrder(order)
-                p.seekTo(p.currentTimeline.getFirstWindowIndex(true), 0)
-                p.play()
+            if (playbackState == Player.STATE_READY) errStreak = 0
+            // Fin de la playlist sin "repetir": vuelve a la primera canción y queda en pausa
+            if (playbackState == Player.STATE_ENDED && p.repeatMode == Player.REPEAT_MODE_OFF && p.mediaItemCount > 0) {
+                handler.post {
+                    if (p.shuffleModeEnabled) {
+                        val order = smartOrder(queue, -1)
+                        for (q in listOf(p1, p2)) if (q.mediaItemCount == queue.size) q.setShuffleOrder(order)
+                    }
+                    p.playWhenReady = false
+                    p.seekTo(p.currentTimeline.getFirstWindowIndex(p.shuffleModeEnabled).coerceAtLeast(0), 0)
+                    notifyUi()
+                }
             }
             notifyUi()
         }

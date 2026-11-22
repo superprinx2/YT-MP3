@@ -299,10 +299,10 @@ object Library {
                 val bmp = if (android.os.Build.VERSION.SDK_INT >= 29)
                     ctx.contentResolver.loadThumbnail(s.uri, android.util.Size(512, 512), null)
                 else null
-                bmp?.let { b -> cover.outputStream().use { b.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, it) } }
+                bmp?.let { b -> cover.outputStream().use { b.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, it) }; b.recycle() }
             }
-            ids += upsert(ctx, Track(key = "local:${s.id}", title = s.title, artist = s.artist, durationMs = s.durationMs,
-                localUri = s.uri.toString(), coverPath = cover.takeIf { it.exists() }?.absolutePath))
+            ids += runCatching { upsert(ctx, Track(key = "local:${s.id}", title = s.title, artist = s.artist, durationMs = s.durationMs,
+                localUri = s.uri.toString(), coverPath = cover.takeIf { it.exists() }?.absolutePath)) }.getOrNull() ?: continue
         }
         Analyzer.kick(ctx)
         return ids

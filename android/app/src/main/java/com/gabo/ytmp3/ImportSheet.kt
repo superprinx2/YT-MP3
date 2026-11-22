@@ -64,8 +64,12 @@ object ImportSheet {
 
     fun import(a: AppCompatActivity, songs: List<Library.LocalSong>, playlists: Set<Long>) {
         a.lifecycleScope.launch {
-            val ids = withContext(Dispatchers.IO) { Library.importLocal(a, songs) }
-            Library.addToPlaylists(a, ids, playlists)
+            val ids = try {
+                withContext(Dispatchers.IO) { Library.importLocal(a, songs).also { Library.addToPlaylists(a, it, playlists) } }
+            } catch (e: Throwable) {
+                BlackBox.log(a, "no se pudo agregar música: ${e.javaClass.simpleName}: ${e.message?.take(120)}")
+                Toast.makeText(a, "No se pudieron agregar algunas canciones", Toast.LENGTH_LONG).show(); return@launch
+            }
             Toast.makeText(a, "${ids.size} ${if (ids.size == 1) "canción agregada" else "canciones agregadas"} ✓", Toast.LENGTH_SHORT).show()
         }
     }

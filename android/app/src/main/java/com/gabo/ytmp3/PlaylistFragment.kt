@@ -41,6 +41,35 @@ class PlaylistFragment : Fragment(), AccentAware {
     private val act get() = requireActivity() as AppCompatActivity
     private var playlist: Playlist? = null
     private var tracks: List<Track> = emptyList()
+    private var raw: List<Track> = emptyList()
+
+    private val sortNames = listOf("Orden personalizado", "Recién añadidas", "Título (A-Z)", "Artista (A-Z)",
+        "Duración (más cortas)", "Duración (más largas)", "Más escuchadas")
+    private val sortKey get() = "sort_$pid"
+    private fun sortMode(): Int = requireContext().getSharedPreferences("playlist_sort", 0).getInt(sortKey, 0)
+
+    private fun sorted(t: List<Track>): List<Track> = when (sortMode()) {
+        1 -> t.sortedByDescending { it.addedAt }
+        2 -> t.sortedBy { it.title.lowercase() }
+        3 -> t.sortedWith(compareBy({ it.artist.ifEmpty { "~" }.lowercase() }, { it.title.lowercase() }))
+        4 -> t.sortedBy { if (it.durationMs > 0) it.durationMs else Long.MAX_VALUE }
+        5 -> t.sortedByDescending { it.durationMs }
+        6 -> t.sortedByDescending { it.playCount }
+        else -> t
+    }
+
+    private fun chooseSort() {
+        ActionSheet.show(act, "Ordenar por", sortNames, selected = sortMode()) { i ->
+            act.getSharedPreferences("playlist_sort", 0).edit().putInt(sortKey, i).apply()
+            tracks = sorted(raw); adapter.notifyDataSetChanged()
+        }
+    }
+
+    private fun repeatIcon(mode: Int) = when (mode) {
+        androidx.media3.common.Player.REPEAT_MODE_ONE -> R.drawable.ic_repeat_one
+        androidx.media3.common.Player.REPEAT_MODE_ALL -> R.drawable.ic_repeat_on
+        else -> R.drawable.ic_repeat
+    }
     private lateinit var list: RecyclerView
     private lateinit var adapter: Adapter
     private var header: LinearLayout? = null
@@ -71,7 +100,7 @@ class PlaylistFragment : Fragment(), AccentAware {
                     }
                 }
                 (when (pid) { -1L -> dao.allTracks(); -2L -> dao.topTracks(); -3L -> dao.localTracks(); else -> dao.tracksOf(pid) }).collect { t ->
-                    tracks = t; adapter.notifyDataSetChanged(); loadHeaderColor()
+                    raw = t; tracks = sorted(t); adapter.notifyDataSetChanged(); loadHeaderColor()
                 }
             }
         }
@@ -262,6 +291,33 @@ class PlaylistFragment : Fragment(), AccentAware {
                 (activity as? MainActivity)?.openDj(null, tracks, cur, "DJ · ${p.name}", p.id)
             }
         }, lp(c.dp(40), c.dp(40)).apply { marginEnd = c.dp(6) })
+        actions.addView(c.icon(R.drawable.ic_sort, 44, if (sortMode() != 0) BRAND_RED else Color.WHITE, 10).apply {
+            contentDescription = "Ordenar"
+            setOnClickListener { it.haptic(); chooseSort() }
+        })
+        val rep = PlayerHub.service?.active?.repeatMode ?: Prefs2(c).repeat
+        actions.addView(c.icon(repeatIcon(rep), 44, if (rep != androidx.media3.common.Player.REPEAT_MODE_OFF) BRAND_RED else Color.WHITE, 9).apply {
+            contentDescription = "Repetir"
+            setOnClickListener { v ->
+                v.haptic()
+                val s = PlayerHub.service
+                val next = if (s != null) { s.cycleRepeat(); s.active.repeatMode } else {
+                    val n = when (Prefs2(c).repeat) {
+                        androidx.media3.common.Player.REPEAT_MODE_OFF -> androidx.media3.common.Player.REPEAT_MODE_ALL
+                        androidx.media3.common.Player.REPEAT_MODE_ALL -> androidx.media3.common.Player.REPEAT_MODE_ONE
+                        else -> androidx.media3.common.Player.REPEAT_MODE_OFF
+                    }
+                    Prefs2(c).repeat = n; n
+                }
+                setImageResource(repeatIcon(next))
+                setColorFilter(if (next != androidx.media3.common.Player.REPEAT_MODE_OFF) BRAND_RED else Color.WHITE)
+                android.widget.Toast.makeText(c, when (next) {
+                    androidx.media3.common.Player.REPEAT_MODE_ALL -> "Repetir toda la playlist"
+                    androidx.media3.common.Player.REPEAT_MODE_ONE -> "Repetir esta canción"
+                    else -> "Sin repetir: al final se detiene"
+                }, android.widget.Toast.LENGTH_SHORT).show()
+            }
+        })
         val shuffleOn = Prefs2(c).shuffle
         actions.addView(c.icon(R.drawable.ic_shuffle, 44, if (shuffleOn) BRAND_RED else Color.WHITE, 9).apply {
             setOnClickListener {
