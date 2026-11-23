@@ -173,3 +173,14 @@ DJ desde playlist y desde canción).
 - Barra de progreso fina (4 dp) con punto pequeño; menú ⋮ vertical.
 - Fila inferior: sonido (ajustes), compartir, cola. Tarjeta "A continuación" (próxima canción, abre la cola).
 - Portadas de Spotify en máxima resolución (ab67616d000082c1, ~1400 px; respaldo 640 px).
+
+## v2.16 (cierre al agregar música del celular + pruebas)
+- Causa probable del cierre en Huawei: tras agregar canciones, el analizador decodifica cada archivo con el códec del
+  celular; si el códec se cae en código nativo, la app entera muere, y al reabrirla vuelve a analizar y se cierra otra vez.
+- Arreglo: el análisis corre en un proceso aparte (`AnalyzerRemoteService`, android:process=":ana"). Si se cae, solo
+  muere ese proceso; la canción queda "sin analizar" y la app sigue. Probado matando el proceso 3 veces durante un análisis.
+- App.scope con CoroutineExceptionHandler: los errores en segundo plano se anotan en el informe en vez de cerrar la app.
+- Modo seguro: el contador de cierres al arrancar se reinicia a los 60 s (antes 8 s).
+- Ajustes › Biblioteca: las secciones salían duplicadas (onCreate + onResume construían la pantalla dos veces).
+- Pruebas: 19 000 acciones aleatorias (monkey, 4 rondas) sin cierres ni bloqueos; 15 formatos raros (FLAC, M4A, OGG,
+  OPUS, WAV 96 kHz/24 bits, AMR, 5.1, 1 s, mix de 2 h, silencio, archivo roto y vacío) agregados y reproducidos.

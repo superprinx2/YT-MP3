@@ -374,7 +374,7 @@ class MainActivity : AppCompatActivity() {
 
     /** Si la app llegó a abrir bien, se borra el contador de cierres; y si la vez anterior falló, se ofrece enviar el error. */
     private fun bootOk() {
-        window.decorView.postDelayed({ getSharedPreferences("boot", MODE_PRIVATE).edit().putInt("fails", 0).apply() }, 8000)
+        window.decorView.postDelayed({ getSharedPreferences("boot", MODE_PRIVATE).edit().putInt("fails", 0).apply() }, 60_000)
         val f = java.io.File(filesDir, "crash_last.txt")
         if (!f.exists()) return
         val txt = runCatching { f.readText() }.getOrDefault("")

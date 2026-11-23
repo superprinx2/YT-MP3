@@ -112,7 +112,7 @@ object Analyzer {
         val sp = ctx.applicationContext.getSharedPreferences("analyzer", Context.MODE_PRIVATE)
         sp.edit().putLong("busy", t.id).commit()
         val r = withContext(dispatcher) {
-            try { analyze(ctx, t.audioUri()) }
+            try { AnalyzerRemote.analyze(ctx, t.audioUri()) }
             catch (e: Throwable) { Log.w(TAG, "analyze ${t.title}", e); BlackBox.log(ctx, "no se pudo analizar «${t.title.take(40)}»: ${e.javaClass.simpleName}"); null }
         }
         sp.edit().putLong("busy", 0L).apply()

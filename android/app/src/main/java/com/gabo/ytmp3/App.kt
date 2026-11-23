@@ -36,7 +36,11 @@ class App : Application(), coil.ImageLoaderFactory {
 
         /** Se completa cuando Python + yt-dlp + ffmpeg están listos (la 1ª vez tarda unos segundos). */
         val ready = CompletableDeferred<Unit>()
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        /** Trabajos en segundo plano: un error inesperado se anota en el informe en vez de cerrar la app. */
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + kotlinx.coroutines.CoroutineExceptionHandler { _, e ->
+            Log.e(TAG, "error en segundo plano", e)
+            runCatching { BlackBox.log(instance, "error en segundo plano: ${e.javaClass.simpleName}: ${e.message?.take(160)}") }
+        })
 
         /** Caché de yt-dlp (desafíos JS de YouTube ya resueltos, etc.). */
         fun cacheDir(ctx: android.content.Context) = java.io.File(ctx.filesDir, "ytdlp-cache").apply { mkdirs() }
@@ -45,6 +49,8 @@ class App : Application(), coil.ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        // Proceso auxiliar de análisis: no se inicia nada más (ni yt-dlp, ni el analizador, ni contadores)
+        if (AnalyzerRemote.isAnaProcess(this)) return
         Prefs2.applyTheme(this)
         createChannels()
         // Registro de errores: si la app se cierra, se guarda el detalle para enviarlo después

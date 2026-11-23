@@ -65,8 +65,13 @@ class SettingsActivity : AppCompatActivity() {
         build()
     }
 
+    private var firstResume = true
+    /** Sube cada vez que se reconstruye la pantalla: lo que termina de cargar tarde y ya no corresponde, se descarta. */
+    private var gen = 0
+
     override fun onResume() {
         super.onResume()
+        if (firstResume) { firstResume = false; return }   // onCreate ya la construyó
         if (::content.isInitialized) build()   // p. ej. al volver de los ajustes de batería
     }
 
@@ -101,6 +106,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun open(s: String) = startActivity(Intent(this, SettingsActivity::class.java).putExtra(EXTRA_SECTION, s))
 
     private fun build() {
+        gen++
         content.removeAllViews()
         val sec = section
         val label = if (sec == null) "Ajustes" else when (sec) {
@@ -326,10 +332,12 @@ class SettingsActivity : AppCompatActivity() {
         val card = card()
         content.addView(card)
         val per = card()
+        val g = gen
         lifecycleScope.launch {
             val dao = Library.dao(this@SettingsActivity)
             val audio = dao.totalAudio(); val video = dao.totalVideo()
             val sizes = dao.sizes()
+            if (g != gen) return@launch
             card.addView(row("🎵", "Canciones (audio)", Util.fmtBytes(audio), position = Pos.TOP, chevron = false) {})
             card.addView(separator(52))
             card.addView(row("🎬", "Videos", Util.fmtBytes(video), position = Pos.MID, chevron = false) {})
