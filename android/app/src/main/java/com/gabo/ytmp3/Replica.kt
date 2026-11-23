@@ -184,6 +184,40 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
   }catch(e){}
 })();"""
 
+        /** Junta las playlists de la barra lateral "Tu biblioteca" (la va bajando para que carguen todas). */
+        private const val SPOTIFY_LIB_JS = """(function(){
+  var found={}, order=[], tries=0, stable=0, last=-1;
+  function add(url,name){ if(found[url]) return; found[url]=1; order.push({url:url,name:(name||'').trim()||'Playlist de Spotify'}); }
+  function grab(){
+    var side=document.getElementById('Desktop_LeftSidebar_Id')||document.querySelector('nav')||document;
+    side.querySelectorAll('a[href*="/playlist/"]').forEach(function(a){
+      var m=(a.getAttribute('href')||'').match(/\/playlist\/([A-Za-z0-9]+)/);
+      if(m) add('https://open.spotify.com/playlist/'+m[1], a.textContent||a.getAttribute('title'));
+    });
+    side.querySelectorAll('[id*="spotify:playlist:"]').forEach(function(e){
+      var m=e.id.match(/spotify:playlist:([A-Za-z0-9]+)/);
+      if(m) add('https://open.spotify.com/playlist/'+m[1], e.textContent);
+    });
+    if(side.querySelector('a[href*="/collection/tracks"],[id*=":collection"]')) add('https://open.spotify.com/collection/tracks','Tus me gusta');
+  }
+  function scroller(){
+    var side=document.getElementById('Desktop_LeftSidebar_Id'); if(!side) return null;
+    var els=side.querySelectorAll('div'); var best=null;
+    for(var i=0;i<els.length;i++){ var e=els[i]; if(e.scrollHeight>e.clientHeight+40){ var o=getComputedStyle(e).overflowY; if(o==='auto'||o==='scroll'){ best=e; } } }
+    return best;
+  }
+  function step(){
+    grab();
+    var s=scroller(); if(s){ s.scrollTop=s.scrollTop+Math.max(200,s.clientHeight*0.8); }
+    if(order.length===last){ stable++; } else { stable=0; last=order.length; }
+    try{ DSBridge.libprogress(order.length); }catch(e){}
+    tries++;
+    if((order.length>0 && stable>=6) || tries>60){ DSBridge.library(JSON.stringify(order)); return; }
+    setTimeout(step, 500);
+  }
+  step();
+})();"""
+
         private const val SPOTIFY_JS = """(function(){
   var seen={}, order=[], stable=0, last=-1, tries=0;
   function grab(){
@@ -259,7 +293,7 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
             override fun onPageFinished(view: WebView, url: String?) {
                 bar.visibility = View.GONE; check(url)
                 val cb = pendingCollect
-                if (cb != null && url != null && (url.contains("/playlist/") || url.contains("/album/"))) {
+                if (cb != null && url != null && (url.contains("/playlist/") || url.contains("/album/") || url.contains("/collection/tracks"))) {
                     pendingCollect = null
                     view.postDelayed({ collectSpotify(cb) }, 1500)
                 }
@@ -345,6 +379,16 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
         @android.webkit.JavascriptInterface fun progress(n: Int) {
             pill.post { pill.text = "Leyendo playlist… $n canciones" }
         }
+        @android.webkit.JavascriptInterface fun libprogress(n: Int) {
+            pill.post { pill.text = "Leyendo tu biblioteca… $n playlists" }
+        }
+        @android.webkit.JavascriptInterface fun library(json: String) {
+            val list = runCatching {
+                val arr = org.json.JSONArray(json)
+                (0 until arr.length()).map { i -> arr.getJSONObject(i).let { it.getString("name") to it.getString("url") } }
+            }.getOrDefault(emptyList())
+            pill.post { pill.text = "⬇  Descargar canciones"; val cb = libraryCb; libraryCb = null; cb?.invoke(list) }
+        }
         @android.webkit.JavascriptInterface fun done(json: String, title: String) {
             val items = runCatching {
                 val arr = org.json.JSONArray(json)
@@ -373,6 +417,21 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
         pendingCollect = cb
         ensureWeb().loadUrl(url)
     }
+
+    private var libraryCb: ((List<Pair<String, String>>) -> Unit)? = null
+
+    /** Lee las playlists de "Tu biblioteca" (barra lateral de Spotify, con la sesión iniciada). Devuelve nombre → enlace. */
+    fun collectSpotifyLibrary(cb: (List<Pair<String, String>>) -> Unit) {
+        show(Platform.SPOTIFY)
+        val w = ensureWeb()
+        libraryCb = cb
+        pill.text = "Leyendo tu biblioteca…"
+        w.loadUrl(home(Platform.SPOTIFY))
+        w.postDelayed({ if (libraryCb != null) w.evaluateJavascript(SPOTIFY_LIB_JS, null) }, 4000)
+    }
+
+    /** Se abandona una lectura que no terminó (para no dejar la respuesta pendiente). */
+    fun cancelCollect() { pendingCollect = null; spotifyCb = null; libraryCb = null }
 
     fun collectSpotify(cb: (String, List<VideoItem>) -> Unit) {
         val w = web ?: return cb("", emptyList())

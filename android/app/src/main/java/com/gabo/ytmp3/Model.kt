@@ -76,6 +76,8 @@ class VideoItem(
     @Volatile var phase: String = ""
     @Volatile var speedBps: Double = 0.0
     @Volatile var etaSec: Long = -1
+    /** Playlists propias de esta canción (descarga de "todas mis playlists": cada una va a la suya). */
+    @Volatile var extraTargets: Set<Long> = emptySet()
 
     val thumbnail: String? get() = thumbUrl ?: if (platform == Platform.YOUTUBE) "https://i.ytimg.com/vi/$id/mqdefault.jpg" else null
     val thumbnailHq: String? get() = if (platform == Platform.YOUTUBE) "https://i.ytimg.com/vi/$id/hqdefault.jpg" else thumbUrl

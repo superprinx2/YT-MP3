@@ -581,9 +581,12 @@ class DownloadFragment : Fragment(), BackAware {
 
     private fun moreMenu() {
         val p = prefs.platform
-        val opts = listOf("Pegar enlace copiado", "Iniciar sesión en ${p.label}", "Ir al inicio de ${p.label}", "Ajustes de descargas")
+        val bulk = p == Platform.YOUTUBE || p == Platform.SPOTIFY
+        val opts = listOf("Pegar enlace copiado", "Iniciar sesión en ${p.label}", "Ir al inicio de ${p.label}", "Ajustes de descargas") +
+            (if (bulk) listOf("⬇  Descargar todas mis playlists") else emptyList())
         ActionSheet.show(ctx, "Opciones", opts) { i ->
             when (i) {
+                4 -> bulkWizard(p)
                 0 -> {
                     val clip = ctx.getSystemService(ClipboardManager::class.java).primaryClip
                     val url = Util.extractUrl(clip?.takeIf { c -> c.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString())
@@ -594,6 +597,95 @@ class DownloadFragment : Fragment(), BackAware {
                 3 -> startActivity(Intent(ctx, SettingsActivity::class.java))
             }
         }
+    }
+
+    // ------------------------------------------------------------------ asistente "todas mis playlists"
+    private var bulkRunning = false
+
+    private fun bulkWizard(p: Platform) {
+        if (DownloadState.running) { toast("Espera a que termine la descarga actual"); return }
+        if (bulkRunning) return
+        if (!BulkPlaylists.loggedIn(p)) {
+            MaterialAlertDialogBuilder(ctx)
+                .setTitle("Primero inicia sesión")
+                .setMessage("Para ver tus playlists, inicia sesión en ${p.label} aquí dentro de la app. Luego vuelve a ⋯ › Descargar todas mis playlists.")
+                .setPositiveButton("Iniciar sesión") { _, _ -> login() }
+                .setNeutralButton("Ya inicié sesión") { _, _ -> bulkStart(p) }
+                .setNegativeButton("Ahora no", null).show()
+            return
+        }
+        bulkStart(p)
+    }
+
+    private fun bulkStart(p: Platform) {
+        if (bulkRunning || DownloadState.running) return
+        bulkRunning = true
+        val prog = BulkPlaylists.Progress(ctx, "Tus playlists de ${p.label}")
+        prog.set("Buscando tus playlists…")
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                if (p == Platform.SPOTIFY) { showingResults = false; updateMode() }
+                val lists = if (p == Platform.YOUTUBE) BulkPlaylists.youtubeLists(ctx.applicationContext)
+                            else BulkPlaylists.spotifyLists(web)
+                if (prog.cancelled) return@launch
+                if (lists.isEmpty()) {
+                    prog.close()
+                    toast(if (p == Platform.SPOTIFY) "No vimos playlists en «Tu biblioteca». Ábrela en Spotify y prueba otra vez."
+                          else "No encontramos playlists en tu cuenta de YouTube")
+                    return@launch
+                }
+                // Paso 2: contar las canciones de cada una (se leen completas, sin tope de 100)
+                val groups = ArrayList<BulkPlaylists.Group>()
+                for ((idx, pair) in lists.withIndex()) {
+                    if (prog.cancelled) return@launch
+                    val (name, url) = pair
+                    prog.set("Encontramos ${lists.size} playlists.\n\nContando canciones ${idx + 1} de ${lists.size}:\n«$name»" +
+                        "\n\nVan ${groups.sumOf { it.items.size }} canciones")
+                    val items = runCatching {
+                        if (p == Platform.YOUTUBE) BulkPlaylists.youtubeItems(ctx.applicationContext, url) else BulkPlaylists.spotifyItems(web, url)
+                    }.getOrDefault(emptyList())
+                    groups += BulkPlaylists.Group(name, items)
+                }
+                prog.close()
+                if (p == Platform.SPOTIFY) web.goHome()
+                // Paso 3: elegir cuáles bajar completas
+                val chosen = BulkPlaylists.choose(ctx, p, groups) ?: return@launch
+                if (chosen.isEmpty()) return@launch
+                startBulk(p, chosen)
+            } catch (e: Exception) {
+                prog.close()
+                toast("No se pudieron leer tus playlists: ${e.message?.lineSequence()?.firstOrNull()?.take(120) ?: e.javaClass.simpleName}")
+            } finally {
+                prog.close(); bulkRunning = false
+            }
+        }
+    }
+
+    /** Cada playlist va a una playlist de DownSong con el mismo nombre; las canciones repetidas se bajan una vez. */
+    private suspend fun startBulk(p: Platform, groups: List<BulkPlaylists.Group>) {
+        if (DownloadState.running) { toast("Espera a que termine la descarga actual"); return }
+        val app = ctx.applicationContext
+        val existing = Library.dao(app).playlists()
+        val merged = LinkedHashMap<String, VideoItem>()
+        for (g in groups) {
+            val pid = existing.firstOrNull { it.name.equals(g.name, ignoreCase = true) }?.id ?: Library.createPlaylist(app, g.name)
+            for (it in g.items) {
+                val m = merged.getOrPut("${it.platform}:${it.id}") { it }
+                m.extraTargets = m.extraTargets + pid
+            }
+        }
+        val list = merged.values.toList()
+        list.forEach { it.checked = true }
+        DownloadState.items.clear(); DownloadState.items.addAll(list)
+        DownloadState.listTitle = "Mis playlists de ${p.label} (${groups.size})"; DownloadState.isPlaylist = true
+        DownloadState.finishedMessage = null; DownloadState.totalCount = 0
+        fromSearch = false
+        if (prefs.format != Format.MP3) setFormat(Format.MP3)
+        showingResults = true; updateMode()
+        adapter.notifyDataSetChanged(); render()
+        val p2 = Prefs2(ctx)
+        DownloadService.start(ctx, Format.MP3, prefs.qualityMp3, LongArray(0), if (p2.saveLocal) p2.saveLocalPath else null)
+        toast("Descargando ${list.size} canciones de ${groups.size} playlists. Puedes salir de la app: sigue en segundo plano.")
     }
 
     private fun login() {

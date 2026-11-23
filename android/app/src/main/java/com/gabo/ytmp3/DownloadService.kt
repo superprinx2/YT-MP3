@@ -427,7 +427,8 @@ class DownloadService : Service() {
         }.onFailure { android.util.Log.w("DSDownload", "exportVideo", it) }
     }
 
-    private fun downloadOne(item: VideoItem, format: Format, quality: Int, targets: List<Long>): Result {
+    private fun downloadOne(item: VideoItem, format: Format, quality: Int, common: List<Long>): Result {
+        val targets = (common + item.extraTargets).distinct()
         // ¿Ya está en la biblioteca? Solo se agrega a las playlists (sin volver a bajarlo).
         val key = "${item.platform.name.lowercase()}:${item.id}"
         val wantVideo = format == Format.MP4 && item.platform != Platform.SPOTIFY
@@ -645,7 +646,7 @@ class DownloadService : Service() {
             runCatching {
                 val f = File(Library.dir(this, "covers"), "$safe.jpg")
                 // la portada de esta canción (no la de la playlist)
-                val url = SpotifySource.trackCover(item.id) ?: item.thumbUrl ?: error("sin portada")
+                val url = SpotifySource.trackCover(item.id) ?: item.thumbUrl?.let { SpotifySource.hq(it) } ?: error("sin portada")
                 java.net.URL(url).openStream().use { i -> f.outputStream().use { i.copyTo(it) } }
                 cover = f
             }

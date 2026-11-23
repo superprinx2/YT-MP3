@@ -63,8 +63,11 @@ object SpotifySource {
     fun trackCover(id: String): String? = runCatching {
         if (id.startsWith("sp")) return null
         val js = JSONObject(get("https://open.spotify.com/oembed?url=https://open.spotify.com/track/$id"))
-        js.optString("thumbnail_url").takeIf { it.startsWith("http") }
+        js.optString("thumbnail_url").takeIf { it.startsWith("http") }?.let { hq(it) }
     }.getOrNull()
+
+    /** Portada en alta resolución (640 px) en lugar de la de 300 o 64 px. */
+    fun hq(url: String): String = url.replace("ab67616d00001e02", "ab67616d0000b273").replace("ab67616d00004851", "ab67616d0000b273")
 
     /** Devuelve (nombre, ¿es lista?, canciones). */
     fun fetch(url: String): Triple<String, Boolean, List<VideoItem>> {

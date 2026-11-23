@@ -138,3 +138,15 @@ DJ desde playlist y desde canción).
   (`durMs` del servicio, usada por la pantalla, la mini barra, el DJ, la pantalla de bloqueo y el fundido).
 - Analizador v3: compara las muestras contadas con el reloj del archivo y corrige la escala si no coinciden; todas las
   canciones se vuelven a analizar. "Saltar silencios" solo usa análisis v3.
+
+## v2.12 (asistente "Descargar todas mis playlists")
+- Descargar › ⋯ (YouTube o Spotify, con sesión iniciada en la réplica): asistente en 3 pasos.
+  1) busca tus playlists (YouTube: `yt-dlp --flat-playlist` de /feed/playlists con tus cookies + "Videos que me gustan";
+     Spotify: barra lateral "Tu biblioteca" leída en la réplica, incluye "Tus me gusta");
+  2) lee cada una COMPLETA y cuenta sus canciones (sin el tope de 100);
+  3) muestra "N playlists · M canciones" con el conteo de cada una para marcar cuáles bajar.
+- Cada playlist se guarda en una playlist de DownSong con el mismo nombre (VideoItem.extraTargets); las canciones
+  repetidas se bajan una sola vez. La descarga sigue en segundo plano con su notificación de avance.
+- Spotify: portada de cada canción en alta resolución (640 px, ab67616d0000b273).
+- Sin sesión de Spotify detectada se puede seguir con "Ya inicié sesión". La app solo mira si existe la cookie de
+  sesión, nunca lee ni usa su valor.
