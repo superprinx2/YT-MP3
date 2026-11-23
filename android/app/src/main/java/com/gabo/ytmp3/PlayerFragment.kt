@@ -123,13 +123,13 @@ class PlayerFragment : Fragment() {
             progressBackgroundTintList = android.content.res.ColorStateList.valueOf(0x4DFFFFFF)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) {
-                    if (fromUser) PlayerHub.service?.active?.duration?.takeIf { it > 0 }?.let { posText.text = fmt(it * p / 1000) }
+                    if (fromUser) PlayerHub.service?.durMs?.takeIf { it > 0 }?.let { posText.text = fmt(it * p / 1000) }
                 }
                 override fun onStartTrackingTouch(sb: SeekBar) { dragging = true }
                 override fun onStopTrackingTouch(sb: SeekBar) {
                     dragging = false
                     val s = PlayerHub.service ?: return
-                    val d = s.active.duration
+                    val d = s.durMs
                     if (d > 0) s.seekTo(d * sb.progress / 1000)
                 }
             })
@@ -243,7 +243,7 @@ class PlayerFragment : Fragment() {
         override fun run() {
             val s = PlayerHub.service
             if (s != null && !dragging) {
-                val d = s.active.duration; val p = s.active.currentPosition
+                val d = s.durMs; val p = s.active.currentPosition
                 if (d > 0) { seek.progress = (p * 1000 / d).toInt(); durText.text = fmt(d) }
                 posText.text = fmt(p)
             }

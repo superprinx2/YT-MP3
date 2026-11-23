@@ -418,7 +418,7 @@ class MainActivity : AppCompatActivity() {
         override fun run() {
             val s = PlayerHub.service
             if (s != null && mini.visibility == View.VISIBLE) {
-                val d = s.active.duration
+                val d = s.durMs
                 miniProgress.progress = if (d > 0) (s.active.currentPosition * 1000 / d).toInt() else 0
             }
             mini.postDelayed(this, 500)

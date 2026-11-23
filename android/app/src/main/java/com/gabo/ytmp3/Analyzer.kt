@@ -44,7 +44,7 @@ object Analyzer {
     /** Solo se escuchan los primeros 12 minutos (los mixes de horas llenaban la memoria y cerraban la app). */
     private const val MAX_US = 12L * 60 * 1_000_000
     /** Versión del análisis: al subirla, las canciones se vuelven a analizar en segundo plano. */
-    const val VER = 2
+    const val VER = 3
     private var job: Job? = null
     /** (analizadas en esta tanda, pendientes) para la pantalla "Creando tu DJ…". */
     val progress = MutableStateFlow(0 to 0)
@@ -202,6 +202,7 @@ object Analyzer {
             var dec = rate / 16000.0; var decAcc = 0.0; var decSum = 0f; var decN = 0
             var inDone = false
             var capped = false
+            var maxPts = 0L
             val realDurMs = if (fmt.containsKey(MediaFormat.KEY_DURATION)) fmt.getLong(MediaFormat.KEY_DURATION) / 1000 else 0L
             try {
                 loop@ while (true) {
@@ -223,6 +224,7 @@ object Analyzer {
                         continue
                     }
                     if (oi < 0) continue
+                    if (info.size > 0 && info.presentationTimeUs > maxPts) maxPts = info.presentationTimeUs
                     val ob = codec.getOutputBuffer(oi)!!.order(ByteOrder.LITTLE_ENDIAN)
                     ob.position(info.offset); ob.limit(info.offset + info.size)
                     val fb = if (float) ob.asFloatBuffer() else null
@@ -259,9 +261,15 @@ object Analyzer {
             } finally { runCatching { codec.stop() }; codec.release() }
             if (nf < 43 * 10) throw IllegalStateException("muy corta")
 
-            val fps = rate.toDouble() / hop
+            // Las muestras contadas deben coincidir con el reloj del archivo; si un decodificador entrega otro formato
+            // (canales/bits), todo el análisis quedaría estirado o encogido: se corrige con la escala real.
+            val sampleMs = total * 1000.0 / rate
+            val ptsMs = maxPts / 1000.0
+            val k = if (ptsMs > 5000 && sampleMs > 0 && abs(ptsMs / sampleMs - 1) > 0.04) ptsMs / sampleMs else 1.0
+            if (k != 1.0) Log.w(TAG, "escala de tiempo corregida x$k")
+            val fps = rate.toDouble() / hop / k
             val msPerFrame = 1000.0 / fps
-            val durationMs = (total * 1000.0 / rate).toLong()
+            val durationMs = (sampleMs * k).toLong()
 
             // volumen
             val db = 10 * log10(sumSq / max(1L, total)).toFloat()

@@ -130,3 +130,11 @@ DJ desde playlist y desde canción).
   al agregar avisan en vez de cerrar la app.
 - Descargas: "Cancelar descarga" por encima de la barrita inferior. YouTube: un video abierto desde un Mix/lista
   baja solo ese video. Spotify: resultados a todo el ancho y aviso de cookies cerrado.
+
+## v2.11 (duraciones y cortes)
+- Causa: MP3 de bitrate variable sin cabecera Xing/VBRI. ExoPlayer estimaba la duración con el bitrate del primer cuadro
+  (3:00 → 13:40). Con esa duración falsa el fundido y los recortes caían en cualquier parte y la barra no servía.
+- Arreglo: Mp3Extractor con FLAG_ENABLE_INDEX_SEEKING (tiempos exactos) y duración de respaldo medida por el analizador
+  (`durMs` del servicio, usada por la pantalla, la mini barra, el DJ, la pantalla de bloqueo y el fundido).
+- Analizador v3: compara las muestras contadas con el reloj del archivo y corrige la escala si no coinciden; todas las
+  canciones se vuelven a analizar. "Saltar silencios" solo usa análisis v3.

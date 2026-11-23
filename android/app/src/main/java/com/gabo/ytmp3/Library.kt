@@ -139,8 +139,8 @@ interface LibDao {
     @Query("SELECT trackId, COUNT(*) AS n FROM plays WHERE at >= :since GROUP BY trackId ORDER BY n DESC LIMIT :limit") suspend fun topSince(since: Long, limit: Int): List<TopRow>
     @Query("SELECT COALESCE(SUM(t.durationMs), 0) FROM plays p JOIN tracks t ON t.id = p.trackId WHERE p.at >= :since") suspend fun msSince(since: Long): Long
     @Query("SELECT COUNT(*) FROM plays WHERE at >= :since") fun playsSince(since: Long): Flow<Int>
-    @Query("SELECT * FROM tracks WHERE analyzed = 0 OR (analyzed = 1 AND anaVer < 2) ORDER BY analyzed ASC, lastPlayed DESC, addedAt DESC LIMIT 10") suspend fun needAnalysis(): List<Track>
-    @Query("SELECT COUNT(*) FROM tracks WHERE analyzed = 0 OR (analyzed = 1 AND anaVer < 2)") suspend fun pendingAnalysis(): Int
+    @Query("SELECT * FROM tracks WHERE analyzed = 0 OR (analyzed = 1 AND anaVer < 3) ORDER BY analyzed ASC, lastPlayed DESC, addedAt DESC LIMIT 10") suspend fun needAnalysis(): List<Track>
+    @Query("SELECT COUNT(*) FROM tracks WHERE analyzed = 0 OR (analyzed = 1 AND anaVer < 3)") suspend fun pendingAnalysis(): Int
     @Query("SELECT localUri FROM tracks WHERE localUri IS NOT NULL") suspend fun localUris(): List<String>
     @Query("SELECT id FROM tracks WHERE localUri = :u LIMIT 1") suspend fun localTrackId(u: String): Long?
     @Query("SELECT * FROM mood_scores WHERE trackId IN (:ids)") suspend fun moodScores(ids: List<Long>): List<MoodScore>
@@ -297,7 +297,7 @@ object Library {
             val cover = File(covers, "local_${s.id}.jpg")
             if (!cover.exists()) runCatching {
                 val bmp = if (android.os.Build.VERSION.SDK_INT >= 29)
-                    ctx.contentResolver.loadThumbnail(s.uri, android.util.Size(512, 512), null)
+                    ctx.contentResolver.loadThumbnail(s.uri, android.util.Size(300, 300), null)
                 else null
                 bmp?.let { b -> cover.outputStream().use { b.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, it) }; b.recycle() }
             }

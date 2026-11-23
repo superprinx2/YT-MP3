@@ -167,7 +167,11 @@ class PlaybackService : MediaSessionService() {
                     .build()
         }
         // El foco de audio lo maneja el servicio (un solo dueño para los dos platos).
-        val p = ExoPlayer.Builder(this, rf)
+        // MP3 de bitrate variable sin cabecera: con "index seeking" los tiempos son exactos (antes se estimaba la
+        // duración con el primer cuadro: salía 20 min en una canción de 4 y los cortes caían en cualquier parte).
+        val ef = androidx.media3.extractor.DefaultExtractorsFactory()
+            .setMp3ExtractorFlags(androidx.media3.extractor.mp3.Mp3Extractor.FLAG_ENABLE_INDEX_SEEKING)
+        val p = ExoPlayer.Builder(this, rf, androidx.media3.exoplayer.source.DefaultMediaSourceFactory(this, ef))
             .setAudioAttributes(attrs, false)
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_LOCAL)
@@ -393,7 +397,7 @@ class PlaybackService : MediaSessionService() {
         val art = Covers.fileFor(this, t)
         val uri = if (showVideo && t.hasVideo) t.videoUri()!! else t.audioUri()
         val clip = MediaItem.ClippingConfiguration.Builder().apply {
-            if (prefs.skipSilence && dj == null) {
+            if (prefs.skipSilence && dj == null && t.anaVer >= Analyzer.VER) {
                 val start = t.introMs?.takeIf { it in 301..20_000 } ?: 0L
                 val end = t.outroMs?.takeIf { it > start + 30_000 && (t.durationMs == 0L || it < t.durationMs - 500) }
                 if (start > 0 && (t.durationMs == 0L || start < t.durationMs - 30_000)) setStartPositionMs(start)
@@ -505,6 +509,17 @@ class PlaybackService : MediaSessionService() {
         runCatching { enhancers[p]?.setTargetGain(mb) }
     }
 
+    /**
+     * Duración real de lo que suena: la del archivo si se conoce; si no (MP3 sin cabecera), la medida al analizar.
+     */
+    val durMs: Long get() = durOf(active)
+
+    private fun durOf(p: ExoPlayer): Long {
+        val d = p.duration
+        if (d != C.TIME_UNSET && d > 0) return d
+        return trackOf(p)?.durationMs?.takeIf { it > 0 } ?: C.TIME_UNSET
+    }
+
     private fun trackOf(p: ExoPlayer): Track? =
         p.currentMediaItem?.mediaId?.toLongOrNull()?.let { id -> queue.firstOrNull { it.id == id } }
 
@@ -524,7 +539,7 @@ class PlaybackService : MediaSessionService() {
         if (!fading) {
             if (!prefs.crossfadeOn || !active.isPlaying || active.repeatMode == Player.REPEAT_MODE_ONE) return
             if (!active.hasNextMediaItem()) return
-            val d = active.duration
+            val d = durOf(active)
             if (d == C.TIME_UNSET) return
             val cf = prefs.crossfadeSec * 1000L
             if (d < cf * 2 + 4000) return

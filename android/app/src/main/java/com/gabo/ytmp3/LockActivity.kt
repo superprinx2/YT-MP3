@@ -85,7 +85,7 @@ class LockActivity : AppCompatActivity() {
                 override fun onProgressChanged(s: SeekBar, p: Int, u: Boolean) {}
                 override fun onStartTrackingTouch(s: SeekBar) {}
                 override fun onStopTrackingTouch(s: SeekBar) {
-                    val sv = PlayerHub.service ?: return; val d = sv.active.duration
+                    val sv = PlayerHub.service ?: return; val d = sv.durMs
                     if (d > 0) sv.seekTo(d * s.progress / 1000)
                 }
             })
@@ -138,7 +138,7 @@ class LockActivity : AppCompatActivity() {
             val now = Date()
             clock.text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(now)
             date.text = SimpleDateFormat("EEEE d 'de' MMMM", Locale("es")).format(now).replaceFirstChar { it.uppercase() }
-            PlayerHub.service?.active?.let { p -> if (p.duration > 0) seek.progress = (p.currentPosition * 1000 / p.duration).toInt() }
+            PlayerHub.service?.let { s -> val d = s.durMs; if (d > 0) seek.progress = (s.active.currentPosition * 1000 / d).toInt() }
             clock.postDelayed(this, 1000)
         }
     }

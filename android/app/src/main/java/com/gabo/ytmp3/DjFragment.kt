@@ -457,7 +457,7 @@ class DjFragment : Fragment() {
             val s = PlayerHub.service
             val v = bg as? VizView
             if (s != null && v != null) {
-                val d = s.active.duration
+                val d = s.durMs
                 if (d > 0) v.progress = s.active.currentPosition.toFloat() / d
                 v.dominant.takeIf { it != 0 }?.let { vinyl.ringTarget = it }
             }
