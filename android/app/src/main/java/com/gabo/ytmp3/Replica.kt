@@ -185,38 +185,72 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
 })();"""
 
         /** Junta las playlists de la barra lateral "Tu biblioteca" (la va bajando para que carguen todas). */
-        private const val SPOTIFY_LIB_JS = """(function(){
-  var found={}, order=[], tries=0, stable=0, last=-1;
-  function add(url,name){ if(found[url]) return; found[url]=1; order.push({url:url,name:(name||'').trim()||'Playlist de Spotify'}); }
+        /**
+         * Lee "Tu biblioteca" (solo playlists creadas o guardadas). [scope] = 'side' (barra lateral) o 'main'
+         * (página /collection/playlists). Activa el filtro "Playlists", baja la lista para que carguen todas y
+         * reconoce cada playlist por su identificador de Spotify en cualquier atributo (no depende de un selector).
+         */
+        private const val SPOTIFY_LIB_JS = """(function(scope){
+  var found={}, order=[], tries=0, stable=0, last=-1, chip=false;
+  var RX=/spotify:playlist:([A-Za-z0-9]{22})|\/playlist\/([A-Za-z0-9]{22})/;
+  function root(){
+    if(scope==='main') return document.querySelector('main')||document.querySelector('[data-testid="playlist-page"]')||document.body;
+    return document.getElementById('Desktop_LeftSidebar_Id')||document.querySelector('[data-testid="rootlist"]')||document.querySelector('nav[aria-label]')||null;
+  }
+  function nameFor(id, el){
+    var t=document.getElementById('listrow-title-spotify:playlist:'+id);
+    if(t && t.textContent.trim()) return t.textContent.trim();
+    var row=el.closest('[role="row"],[data-testid="rootlist-item"],[data-encore-id="card"],a')||el;
+    var a=row.getAttribute('aria-label'); if(a) return a.replace(/^(Playlist|Lista)\s*[•·:-]\s*/i,'').trim();
+    var p=row.querySelector('p span, p, [data-encore-id="text"]'); if(p && p.textContent.trim()) return p.textContent.trim();
+    var img=row.querySelector('img[alt]'); if(img && img.alt) return img.alt.trim();
+    return (row.textContent||'').trim().split('\n')[0].slice(0,80);
+  }
   function grab(){
-    var side=document.getElementById('Desktop_LeftSidebar_Id')||document.querySelector('nav')||document;
-    side.querySelectorAll('a[href*="/playlist/"]').forEach(function(a){
-      var m=(a.getAttribute('href')||'').match(/\/playlist\/([A-Za-z0-9]+)/);
-      if(m) add('https://open.spotify.com/playlist/'+m[1], a.textContent||a.getAttribute('title'));
-    });
-    side.querySelectorAll('[id*="spotify:playlist:"]').forEach(function(e){
-      var m=e.id.match(/spotify:playlist:([A-Za-z0-9]+)/);
-      if(m) add('https://open.spotify.com/playlist/'+m[1], e.textContent);
-    });
-    if(side.querySelector('a[href*="/collection/tracks"],[id*=":collection"]')) add('https://open.spotify.com/collection/tracks','Tus me gusta');
+    var r=root(); if(!r) return;
+    var els=r.querySelectorAll('*');
+    for(var k=0;k<els.length;k++){
+      var el=els[k], at=el.attributes;
+      for(var q=0;q<at.length;q++){
+        var v=at[q].value; if(!v || v.length>400) continue;
+        var m=v.match(RX); if(!m) continue;
+        var id=m[1]||m[2];
+        if(!found[id]){ found[id]=1; order.push({url:'https://open.spotify.com/playlist/'+id, name:nameFor(id, el)||'Playlist de Spotify'}); }
+      }
+    }
+  }
+  function pickPlaylistsChip(){
+    if(chip || scope!=='side') return; var r=root(); if(!r) return;
+    var bs=r.querySelectorAll('button,[role="checkbox"]');
+    for(var k=0;k<bs.length;k++){ var t=(bs[k].textContent||'').trim().toLowerCase();
+      if(t==='playlists' || t==='listas' || t==='listas de reproducción'){
+        chip=true; if(bs[k].getAttribute('aria-checked')!=='true' && bs[k].getAttribute('aria-pressed')!=='true'){ bs[k].click(); }
+        return; } }
   }
   function scroller(){
-    var side=document.getElementById('Desktop_LeftSidebar_Id'); if(!side) return null;
-    var els=side.querySelectorAll('div'); var best=null;
-    for(var i=0;i<els.length;i++){ var e=els[i]; if(e.scrollHeight>e.clientHeight+40){ var o=getComputedStyle(e).overflowY; if(o==='auto'||o==='scroll'){ best=e; } } }
-    return best;
+    var r=root(); if(!r) return document.scrollingElement;
+    var c=r.querySelectorAll('[data-overlayscrollbars-viewport],.os-viewport,div'); var best=null, bh=0;
+    for(var k=0;k<c.length;k++){ var e=c[k]; var d=e.scrollHeight-e.clientHeight;
+      if(d>40 && e.clientHeight>150){ var o=getComputedStyle(e).overflowY; if((o==='auto'||o==='scroll'||e.hasAttribute('data-overlayscrollbars-viewport')) && e.scrollHeight>bh){ best=e; bh=e.scrollHeight; } } }
+    return best || (scope==='main'? document.scrollingElement : null);
+  }
+  function debug(){
+    var r=root(); var n=0; if(r){ var a=r.querySelectorAll('[id*="spotify:"],[aria-labelledby*="spotify:"],a[href]'); n=a.length; }
+    return 'scope='+scope+' root='+(r? (r.id||r.tagName):'none')+' marcados='+n+' path='+location.pathname+' w='+innerWidth;
   }
   function step(){
-    grab();
-    var s=scroller(); if(s){ s.scrollTop=s.scrollTop+Math.max(200,s.clientHeight*0.8); }
+    // la página de respaldo solo vale si de verdad es "Tus playlists" (sin sesión, Spotify manda al inicio con recomendadas)
+    if(scope==='main' && location.pathname.indexOf('/collection')!==0){ DSBridge.library('[]', debug()+' (redirigido)'); return; }
+    pickPlaylistsChip(); grab();
+    var s=scroller(); if(s){ s.scrollTop=s.scrollTop+Math.max(250,s.clientHeight*0.8); }
     if(order.length===last){ stable++; } else { stable=0; last=order.length; }
     try{ DSBridge.libprogress(order.length); }catch(e){}
     tries++;
-    if((order.length>0 && stable>=6) || tries>60){ DSBridge.library(JSON.stringify(order)); return; }
-    setTimeout(step, 500);
+    if((order.length>0 && stable>=8) || tries>50){ DSBridge.library(JSON.stringify(order), order.length? '' : debug()); return; }
+    setTimeout(step, 600);
   }
   step();
-})();"""
+})"""
 
         private const val SPOTIFY_JS = """(function(){
   var seen={}, order=[], stable=0, last=-1, tries=0;
@@ -410,12 +444,13 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
         @android.webkit.JavascriptInterface fun libprogress(n: Int) {
             pill.post { pill.text = "Leyendo tu biblioteca… $n playlists" }
         }
-        @android.webkit.JavascriptInterface fun library(json: String) {
+        @android.webkit.JavascriptInterface fun library(json: String, debug: String) {
             val list = runCatching {
                 val arr = org.json.JSONArray(json)
                 (0 until arr.length()).map { i -> arr.getJSONObject(i).let { it.getString("name") to it.getString("url") } }
             }.getOrDefault(emptyList())
-            pill.post { pill.text = "⬇  Descargar canciones"; val cb = libraryCb; libraryCb = null; cb?.invoke(list) }
+            if (list.isEmpty()) BlackBox.log(ctx, "biblioteca de Spotify sin playlists: $debug")
+            pill.post { libraryDone(list) }
         }
         @android.webkit.JavascriptInterface fun done(json: String, title: String) {
             val items = runCatching {
@@ -451,11 +486,31 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
     /** Lee las playlists de "Tu biblioteca" (barra lateral de Spotify, con la sesión iniciada). Devuelve nombre → enlace. */
     fun collectSpotifyLibrary(cb: (List<Pair<String, String>>) -> Unit) {
         show(Platform.SPOTIFY)
-        val w = ensureWeb()
         libraryCb = cb
+        libStage = 0
         pill.text = "Leyendo tu biblioteca…"
-        go(home(Platform.SPOTIFY))
-        w.postDelayed({ if (libraryCb != null) w.evaluateJavascript(SPOTIFY_LIB_JS, null) }, 4000)
+        runLibrary("https://open.spotify.com/", "side")
+    }
+
+    private var libStage = 0
+    private fun runLibrary(url: String, scope: String) {
+        val w = ensureWeb()
+        go(url)
+        w.postDelayed({ if (libraryCb != null) w.evaluateJavascript("$SPOTIFY_LIB_JS('$scope');", null) }, 4500)
+    }
+
+    /** Barra lateral vacía → se intenta la página de playlists; luego se entrega lo encontrado. */
+    private fun libraryDone(list: List<Pair<String, String>>) {
+        if (libraryCb == null) return
+        if (list.isEmpty() && libStage == 0) {
+            libStage = 1
+            pill.text = "Buscando en la página de tus playlists…"
+            runLibrary("https://open.spotify.com/collection/playlists", "main")
+            return
+        }
+        pill.text = "⬇  Descargar canciones"
+        val cb = libraryCb; libraryCb = null
+        cb?.invoke(list)
     }
 
     /** Se abandona una lectura que no terminó (para no dejar la respuesta pendiente). */

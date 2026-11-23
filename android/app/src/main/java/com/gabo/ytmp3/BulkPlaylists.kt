@@ -83,7 +83,7 @@ object BulkPlaylists {
 
     // ------------------------------------------------------------------ Spotify (en la réplica, hilo principal)
     suspend fun spotifyLists(web: WebReplica): List<Pair<String, String>> =
-        withTimeoutOrNull(60_000) {
+        withTimeoutOrNull(120_000) {
             suspendCancellableCoroutine { k -> web.collectSpotifyLibrary { if (k.isActive) k.resume(it) } }
         } ?: run { web.cancelCollect(); emptyList() }
 

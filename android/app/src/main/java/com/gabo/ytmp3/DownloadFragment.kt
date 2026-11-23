@@ -30,6 +30,7 @@ import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
@@ -581,22 +582,24 @@ class DownloadFragment : Fragment(), BackAware {
 
     private fun moreMenu() {
         val p = prefs.platform
-        val bulk = p == Platform.YOUTUBE || p == Platform.SPOTIFY
-        val opts = listOf("Pegar enlace copiado", "Iniciar sesión en ${p.label}", "Ir al inicio de ${p.label}", "Ajustes de descargas") +
-            (if (bulk) listOf("⬇  Descargar todas mis playlists") else emptyList())
-        ActionSheet.show(ctx, "Opciones", opts) { i ->
-            when (i) {
-                4 -> bulkWizard(p)
-                0 -> {
-                    val clip = ctx.getSystemService(ClipboardManager::class.java).primaryClip
-                    val url = Util.extractUrl(clip?.takeIf { c -> c.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString())
-                    if (url == null) toast("No hay ningún enlace copiado") else { h.urlInput.setText(url); analyze() }
-                }
-                1 -> login()
-                2 -> goHome()
-                3 -> startActivity(Intent(ctx, SettingsActivity::class.java))
-            }
+        val logged = BulkPlaylists.loggedIn(p)
+        val items = ArrayList<MenuSheet.Item>()
+        if (p == Platform.YOUTUBE || p == Platform.SPOTIFY) items += MenuSheet.Item(R.drawable.ic_library,
+            "Descargar todas mis playlists",
+            if (logged) "Elige cuáles y bájalas completas, también las de más de 100" else "Primero inicia sesión en ${p.label}",
+            accent = true) { bulkWizard(p) }
+        items += MenuSheet.Item(R.drawable.ic_link, "Pegar enlace copiado", "Descarga lo que copiaste con «Compartir › Copiar enlace»") {
+            val clip = ctx.getSystemService(ClipboardManager::class.java).primaryClip
+            val url = Util.extractUrl(clip?.takeIf { c -> c.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString())
+            if (url == null) toast("No hay ningún enlace copiado") else { h.urlInput.setText(url); analyze() }
         }
+        items += MenuSheet.Item(R.drawable.ic_person, if (logged) "Cambiar de cuenta en ${p.label}" else "Iniciar sesión en ${p.label}",
+            if (logged) "Ya iniciaste sesión" else "Para ver tus playlists y tu biblioteca") { login() }
+        items += MenuSheet.Item(R.drawable.ic_home, "Ir al inicio de ${p.label}", null) { goHome() }
+        items += MenuSheet.Item(R.drawable.ic_gear, "Ajustes de descargas", "Calidad, carpeta del celular, velocidad") {
+            startActivity(Intent(ctx, SettingsActivity::class.java))
+        }
+        MenuSheet.show(ctx, p.label, "Opciones de descarga", items)
     }
 
     // ------------------------------------------------------------------ asistente "todas mis playlists"
@@ -684,8 +687,12 @@ class DownloadFragment : Fragment(), BackAware {
         showingResults = true; updateMode()
         adapter.notifyDataSetChanged(); render()
         val p2 = Prefs2(ctx)
-        DownloadService.start(ctx, Format.MP3, prefs.qualityMp3, LongArray(0), if (p2.saveLocal) p2.saveLocalPath else null)
-        toast("Descargando ${list.size} canciones de ${groups.size} playlists. Puedes salir de la app: sigue en segundo plano.")
+        if (!skipAlreadyThere(emptyList(), Format.MP3)) return
+        val n = list.count { it.checked }
+        Background.beforeDownload(ctx, n) {
+            DownloadService.start(ctx, Format.MP3, prefs.qualityMp3, LongArray(0), if (p2.saveLocal) p2.saveLocalPath else null)
+            toast("Descargando $n canciones de ${groups.size} playlists. Puedes bloquear el celular: sigue en segundo plano.")
+        }
     }
 
     private fun login() {
@@ -1118,27 +1125,58 @@ class DownloadFragment : Fragment(), BackAware {
 
     private fun proceedDownload() {
         if (DownloadState.running) return
-        // Primera vez: pedir permiso para seguir con la pantalla bloqueada.
-        if (!prefs.batteryPromptShown && !Device.ignoresBatteryOptimizations(ctx)) {
-            prefs.batteryPromptShown = true
-            MaterialAlertDialogBuilder(ctx)
-                .setTitle("Descargar con la pantalla bloqueada")
-                .setMessage("Para que las descargas sigan aunque bloquees el celular, " +
-                    "permite que DownSong funcione sin restricciones de batería.")
-                .setPositiveButton("Permitir") { _, _ ->
-                    SettingsActivity.requestBatteryExemption(ctx); launchService()
-                }
-                .setNegativeButton("Ahora no") { _, _ -> launchService() }
-                .show()
-            return
-        }
-        launchService()
+        Background.beforeDownload(ctx, DownloadState.items.count { it.checked }) { launchService() }
     }
 
     private fun launchService() {
         val q = if (prefs.format == Format.MP3) prefs.qualityMp3 else prefs.qualityMp4
         val p2 = Prefs2(ctx)
-        DownloadService.start(ctx, prefs.format, q, targets.toLongArray(), if (p2.saveLocal) p2.saveLocalPath else null)
+        val fmt = prefs.format
+        val tg = targets.toLongArray()
+        viewLifecycleOwner.lifecycleScope.launch {
+            if (!skipAlreadyThere(tg.toList(), fmt)) return@launch
+            DownloadService.start(ctx, fmt, q, tg, if (p2.saveLocal) p2.saveLocalPath else null)
+        }
+    }
+
+    /**
+     * Desmarca las canciones que ya están en la(s) playlist(s) de destino (por su enlace o por título + artista).
+     * Así, bajar la misma playlist otra vez solo trae las nuevas, y si la app se cerró a mitad, sigue donde iba.
+     * Devuelve false si no queda nada por bajar.
+     */
+    private suspend fun skipAlreadyThere(common: List<Long>, fmt: Format): Boolean {
+        val jobs = DownloadState.items.filter { it.checked }
+        if (jobs.size < 2) return true
+        val dao = Library.dao(ctx.applicationContext)
+        fun norm(s: String) = s.lowercase().replace(Regex("[^\\p{L}\\p{N}]"), "")
+        val skipped = withContext(Dispatchers.IO) {
+            val cache = HashMap<Long, Pair<Set<String>, Set<String>>>()
+            fun inPl(pid: Long) = cache.getOrPut(pid) {
+                val t = runBlocking { dao.tracksOfNow(pid) }
+                t.map { it.key }.toHashSet() to t.filter { it.artist.isNotBlank() }.map { norm(it.title) + "|" + norm(it.artist) }.toHashSet()
+            }
+            var n = 0
+            for (it in jobs) {
+                val pids = (common + it.extraTargets).distinct()
+                if (pids.isEmpty()) continue
+                val key = "${it.platform.name.lowercase()}:${it.id}"
+                val ta = if (!it.uploader.isNullOrBlank()) norm(it.title) + "|" + norm(it.uploader) else null
+                val wantVideo = fmt == Format.MP4 && it.platform != Platform.SPOTIFY
+                if (wantVideo) continue
+                if (pids.all { pid -> val (keys, names) = inPl(pid); key in keys || (ta != null && ta in names) }) {
+                    it.checked = false; n++
+                }
+            }
+            n
+        }
+        if (skipped > 0) {
+            adapter.notifyDataSetChanged(); render()
+            val left = jobs.size - skipped
+            toast(if (left == 0) "Ya tienes todas estas canciones en tu playlist ✓"
+                  else "$skipped ya estaban en tu playlist. Se bajan solo las $left que faltan.")
+            if (left == 0) return false
+        }
+        return true
     }
 
     private fun confirmCancel() {

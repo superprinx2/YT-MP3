@@ -156,3 +156,12 @@ DJ desde playlist y desde canción).
   de 6 dígitos esperan un teclado físico y rechazan las teclas del teclado del celular.
 - Arreglo: accounts/challenge.spotify.com y los inicios con Google/Facebook/Apple se abren con agente móvil; al volver
   a open.spotify.com vuelve el modo escritorio (shouldOverrideUrlLoading + `go()` para todas las cargas).
+
+## v2.14
+- Sin duplicados: antes de descargar se desmarcan las canciones que ya están en la playlist de destino (por enlace o
+  título + artista). Bajar la misma playlist otra vez solo trae las nuevas; si la app se cerró a mitad, sigue donde iba.
+- Descargas con el celular bloqueado: `Background.beforeDownload` vuelve a pedir el permiso de batería si falta (antes
+  solo una vez) y en Huawei/Honor lleva a "Inicio de aplicaciones › Gestionar manualmente".
+- Detector de playlists de Spotify v2: filtro "Playlists" de Tu biblioteca, reconoce `spotify:playlist:<id>` en
+  cualquier atributo, baja la lista, respaldo en /collection/playlists (solo si no redirige) y diagnóstico en el informe.
+- Menú ⋯ de Descargar al estilo Spotify (MenuSheet: hoja inferior con ícono, título y ayuda por opción).
