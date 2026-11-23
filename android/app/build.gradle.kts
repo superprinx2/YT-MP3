@@ -19,8 +19,8 @@ android {
         applicationId = "com.gabo.ytmp3"
         minSdk = 26
         targetSdk = 34
-        versionCode = 22
-        versionName = "2.12"
+        versionCode = 23
+        versionName = "2.13"
     }
 
     signingConfigs {

@@ -150,3 +150,9 @@ DJ desde playlist y desde canción).
 - Spotify: portada de cada canción en alta resolución (640 px, ab67616d0000b273).
 - Sin sesión de Spotify detectada se puede seguir con "Ya inicié sesión". La app solo mira si existe la cookie de
   sesión, nunca lee ni usa su valor.
+
+## v2.13 (escribir en el inicio de sesión de Spotify)
+- Causa: la réplica de Spotify usa agente de escritorio (para "Tu biblioteca"); en escritorio las casillas del código
+  de 6 dígitos esperan un teclado físico y rechazan las teclas del teclado del celular.
+- Arreglo: accounts/challenge.spotify.com y los inicios con Google/Facebook/Apple se abren con agente móvil; al volver
+  a open.spotify.com vuelve el modo escritorio (shouldOverrideUrlLoading + `go()` para todas las cargas).

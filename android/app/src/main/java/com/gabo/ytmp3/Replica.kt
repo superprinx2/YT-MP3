@@ -287,7 +287,16 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
         w.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, req: WebResourceRequest): Boolean {
                 val s = req.url.scheme ?: return true
-                return s != "http" && s != "https"   // no abrir otras apps (intent://, spotify:, etc.)
+                if (s != "http" && s != "https") return true   // no abrir otras apps (intent://, spotify:, etc.)
+                // al entrar o salir del inicio de sesión de Spotify se cambia de modo y se recarga con el modo correcto
+                if (platform == Platform.SPOTIFY && req.isForMainFrame) {
+                    val want = if (loginHost(req.url.toString())) mobileUa else desktopUa
+                    if (view.settings.userAgentString != want) {
+                        view.settings.userAgentString = want
+                        view.loadUrl(req.url.toString()); return true
+                    }
+                }
+                return false
             }
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) { bar.visibility = View.VISIBLE; check(url) }
             override fun onPageFinished(view: WebView, url: String?) {
@@ -351,6 +360,23 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
     private val desktopUa = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
     /** Spotify en su versión de computadora (la de celular bloquea "Tu biblioteca" y pide su app). */
+    /**
+     * Spotify se ve en modo escritorio (para tener "Tu biblioteca"), pero sus páginas de inicio de sesión no:
+     * en escritorio las casillas del código esperan un teclado físico y el teclado del celular no escribía.
+     */
+    private fun loginHost(url: String?): Boolean {
+        val h = url?.let { runCatching { Uri.parse(it).host }.getOrNull() } ?: return false
+        return listOf("accounts.spotify.com", "challenge.spotify.com", "accounts.google.com", "appleid.apple.com",
+            "facebook.com", "m.facebook.com", "www.facebook.com").any { h == it || h.endsWith(".$it") } ||
+            (h.endsWith("spotify.com") && (url.contains("/login") || url.contains("/challenge")))
+    }
+
+    private fun applyUaFor(w: WebView, url: String?) {
+        if (platform != Platform.SPOTIFY) return
+        val ua = if (loginHost(url)) mobileUa else desktopUa
+        if (w.settings.userAgentString != ua) w.settings.userAgentString = ua
+    }
+
     private fun applyUa(w: WebView, p: Platform) {
         val desk = p == Platform.SPOTIFY
         val ua = if (desk) desktopUa else mobileUa
@@ -367,7 +393,9 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
         field.setText("")
         field.hint = "Buscar en ${p.label} o pegar un enlace"
         pill.visibility = View.GONE
-        w.loadUrl(lastUrl[p]?.takeIf { belongs(p, it) } ?: home(p))
+        val target = lastUrl[p]?.takeIf { belongs(p, it) } ?: home(p)
+        applyUaFor(w, target)
+        w.loadUrl(target)
     }
 
     var onScroll: ((Int, Int) -> Unit)? = null
@@ -415,7 +443,7 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
     fun openAndCollect(url: String, cb: (String, List<VideoItem>) -> Unit) {
         show(Platform.SPOTIFY)
         pendingCollect = cb
-        ensureWeb().loadUrl(url)
+        go(url)
     }
 
     private var libraryCb: ((List<Pair<String, String>>) -> Unit)? = null
@@ -426,7 +454,7 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
         val w = ensureWeb()
         libraryCb = cb
         pill.text = "Leyendo tu biblioteca…"
-        w.loadUrl(home(Platform.SPOTIFY))
+        go(home(Platform.SPOTIFY))
         w.postDelayed({ if (libraryCb != null) w.evaluateJavascript(SPOTIFY_LIB_JS, null) }, 4000)
     }
 
@@ -444,7 +472,7 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
     fun search(p: Platform, q: String) {
         val e = Uri.encode(q)
         show(p)
-        ensureWeb().loadUrl(when (p) {
+        go(when (p) {
             Platform.SPOTIFY -> "https://open.spotify.com/search/$e"
             Platform.TIKTOK -> "https://www.tiktok.com/search?q=$e"
             Platform.INSTAGRAM -> "https://www.instagram.com/explore/search/keyword/?q=$e"
@@ -453,8 +481,11 @@ class WebReplica(private val ctx: Context, private val onDownload: (Platform, St
         })
     }
 
-    fun openLogin(p: Platform) { show(p); ensureWeb().loadUrl(login(p)) }
-    fun goHome() { platform?.let { ensureWeb().loadUrl(home(it)) } }
+    fun openLogin(p: Platform) { show(p); go(login(p)) }
+    fun goHome() { platform?.let { go(home(it)) } }
+
+    /** Abre una dirección con el modo correcto (escritorio en Spotify, móvil en su inicio de sesión). */
+    private fun go(url: String) { val w = ensureWeb(); applyUaFor(w, url); w.loadUrl(url) }
     fun back(): Boolean { val w = web ?: return false; if (w.canGoBack()) { w.goBack(); return true }; return false }
     fun pause() {
         // que no siga sonando un video de la web al salir de la pestaña
