@@ -43,7 +43,13 @@ class PlayerFragment : Fragment() {
     private lateinit var fromText: TextView
     private lateinit var title: TextView
     private lateinit var artist: TextView
-    private lateinit var videoBtn: ImageView
+    private lateinit var videoChip: TextView
+    private lateinit var thumb: ImageView
+    private lateinit var videoScrim: View
+    private lateinit var nextCard: LinearLayout
+    private lateinit var nextTitle: TextView
+    private lateinit var nextSub: TextView
+    private lateinit var nextImg: ImageView
     private lateinit var seek: SeekBar
     private lateinit var posText: TextView
     private lateinit var durText: TextView
@@ -69,6 +75,19 @@ class PlayerFragment : Fragment() {
                 intArrayOf(0x66000000, 0x00000000, 0x00000000, 0xCC000000.toInt()))
         }
         root.addView(scrim, FrameLayout.LayoutParams(MATCH, MATCH))
+        video = PlayerView(c).apply {
+            useController = false
+            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+            setShutterBackgroundColor(Color.TRANSPARENT)
+            visibility = View.GONE
+        }
+        root.addView(video, FrameLayout.LayoutParams(MATCH, MATCH))
+        videoScrim = View(c).apply {
+            visibility = View.GONE
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(0x8C000000.toInt(), 0x00000000, 0x33000000, 0xE6000000.toInt(), 0xFA000000.toInt()))
+        }
+        root.addView(videoScrim, FrameLayout.LayoutParams(MATCH, MATCH))
         val col = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL; setPadding(c.dp(20), 0, c.dp(20), 0) }
         root.addView(col, FrameLayout.LayoutParams(MATCH, MATCH))
 
@@ -80,7 +99,7 @@ class PlayerFragment : Fragment() {
         fromText = c.text("", 13f, Color.WHITE, 2).apply { gravity = Gravity.CENTER }
         mid.addView(fromText)
         top.addView(mid, lp(0, WRAP, 1f))
-        top.addView(c.icon(R.drawable.ic_more_h, 44, Color.WHITE, 9).apply { setOnClickListener { it.haptic(); menu() } })
+        top.addView(c.icon(R.drawable.ic_dots_v, 44, Color.WHITE, 10).apply { setOnClickListener { it.haptic(); menu() } })
         col.addView(top, lp(MATCH, WRAP).apply { topMargin = c.dp(8) })
 
         // portada / video / caleidoscopio
@@ -90,29 +109,45 @@ class PlayerFragment : Fragment() {
             background = roundRect(0xFF222222.toInt(), c.dp(8).toFloat())
         }
         kaleido = KaleidoView(c).apply { clipToOutline = true; background = roundRect(Color.BLACK, c.dp(8).toFloat()) }
-        video = PlayerView(c).apply {
-            useController = false
-            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-            setShutterBackgroundColor(Color.TRANSPARENT)
-            visibility = View.GONE
-        }
         art.addView(coverImg, FrameLayout.LayoutParams(MATCH, MATCH))
         art.addView(kaleido, FrameLayout.LayoutParams(MATCH, MATCH))
-        art.addView(video, FrameLayout.LayoutParams(MATCH, MATCH))
         col.addView(FrameLayout(c).apply {
             addView(art, FrameLayout.LayoutParams(MATCH, MATCH, Gravity.CENTER))
-        }, lp(MATCH, 0, 1f).apply { topMargin = c.dp(24); bottomMargin = c.dp(24) })
+        }, lp(MATCH, 0, 1f).apply { topMargin = c.dp(20); bottomMargin = c.dp(20) })
         art.post { val sz = minOf((art.parent as View).width, (art.parent as View).height); art.layoutParams = FrameLayout.LayoutParams(sz, sz, Gravity.CENTER) }
 
-        // título + botón de video
+        // "Cambiar a video" (solo si la canción tiene video)
+        videoChip = c.text("Cambiar a video", 12.5f, Color.WHITE, 2).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(c.dp(10), c.dp(6), c.dp(12), c.dp(6))
+            background = roundRect(0x66000000, c.dp(16).toFloat())
+            compoundDrawablePadding = c.dp(6)
+            setCompoundDrawablesRelativeWithIntrinsicBounds(
+                androidx.core.content.ContextCompat.getDrawable(c, R.drawable.ic_videocam)?.mutate()?.apply { setBounds(0, 0, c.dp(16), c.dp(16)) }, null, null, null)
+            setOnClickListener { it.haptic(); toggleVideo() }
+        }
+        col.addView(videoChip, lp(WRAP, WRAP).apply { bottomMargin = c.dp(10) })
+
+        // título + artista + agregar a playlist
         val info = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        thumb = ImageView(c).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP; clipToOutline = true
+            background = roundRect(0xFF222222.toInt(), c.dp(4).toFloat()); visibility = View.GONE
+        }
+        info.addView(thumb, lp(c.dp(44), c.dp(44)).apply { marginEnd = c.dp(12) })
         val texts = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
-        title = c.text("", 22f, Color.WHITE, 2)
-        artist = c.text("", 15f, 0xB3FFFFFF.toInt())
+        title = c.text("", 22f, Color.WHITE, 2).apply {
+            isSingleLine = true; ellipsize = android.text.TextUtils.TruncateAt.MARQUEE; marqueeRepeatLimit = -1; isSelected = true
+        }
+        artist = c.text("", 15f, 0xB3FFFFFF.toInt()).apply {
+            isSingleLine = true; ellipsize = android.text.TextUtils.TruncateAt.MARQUEE; marqueeRepeatLimit = -1; isSelected = true
+        }
         texts.addView(title); texts.addView(artist)
         info.addView(texts, lp(0, WRAP, 1f))
-        videoBtn = c.icon(R.drawable.ic_videocam, 44, Color.WHITE, 9).apply { setOnClickListener { it.haptic(); toggleVideo() } }
-        info.addView(videoBtn)
+        info.addView(c.icon(R.drawable.ic_add_circle, 46, Color.WHITE, 10).apply {
+            contentDescription = "Agregar a playlist"
+            setOnClickListener { it.haptic(); addToPlaylist() }
+        })
         col.addView(info)
 
         // barra de progreso
@@ -121,6 +156,9 @@ class PlayerFragment : Fragment() {
             progressTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
             thumbTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
             progressBackgroundTintList = android.content.res.ColorStateList.valueOf(0x4DFFFFFF)
+            thumb = androidx.core.content.ContextCompat.getDrawable(c, R.drawable.ic_dot)
+            splitTrack = false
+            if (android.os.Build.VERSION.SDK_INT >= 29) { minHeight = c.dp(4); maxHeight = c.dp(4) }
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) {
                     if (fromUser) PlayerHub.service?.durMs?.takeIf { it > 0 }?.let { posText.text = fmt(it * p / 1000) }
@@ -156,7 +194,42 @@ class PlayerFragment : Fragment() {
             if (i > 0) ctr.addView(View(c), lp(0, 1, 1f))
             ctr.addView(v)
         }
-        col.addView(ctr, lp(MATCH, WRAP).apply { topMargin = c.dp(8); bottomMargin = c.dp(28) })
+        col.addView(ctr, lp(MATCH, WRAP).apply { topMargin = c.dp(4) })
+
+        // fila inferior: ajustes de sonido · compartir · cola
+        val bottom = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        bottom.addView(c.icon(R.drawable.ic_tune, 40, Color.WHITE, 9).apply {
+            contentDescription = "Sonido"
+            setOnClickListener { it.haptic(); startActivity(android.content.Intent(c, SettingsActivity::class.java)) }
+        })
+        bottom.addView(View(c), lp(0, 1, 1f))
+        bottom.addView(c.icon(R.drawable.ic_share, 40, Color.WHITE, 9).apply {
+            contentDescription = "Compartir"
+            setOnClickListener { it.haptic(); share() }
+        })
+        bottom.addView(c.icon(R.drawable.ic_queue, 40, Color.WHITE, 8).apply {
+            contentDescription = "Cola"
+            setOnClickListener { it.haptic(); showQueue() }
+        }, lp(WRAP, WRAP).apply { marginStart = c.dp(14) })
+        col.addView(bottom, lp(MATCH, WRAP).apply { topMargin = c.dp(10) })
+
+        // tarjeta "A continuación" (en lugar de la letra)
+        nextCard = LinearLayout(c).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(c.dp(16), c.dp(12), c.dp(16), c.dp(12))
+            background = roundRect(0x33000000, c.dp(12).toFloat())
+            setOnClickListener { it.haptic(); showQueue() }
+        }
+        nextCard.addView(c.text("A continuación", 15f, Color.WHITE, 2))
+        val nrow = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, c.dp(10), 0, 0) }
+        nextImg = ImageView(c).apply { scaleType = ImageView.ScaleType.CENTER_CROP; clipToOutline = true; background = roundRect(0xFF222222.toInt(), c.dp(4).toFloat()) }
+        nrow.addView(nextImg, lp(c.dp(40), c.dp(40)))
+        val ntexts = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL; setPadding(c.dp(12), 0, 0, 0) }
+        nextTitle = c.text("", 14f, Color.WHITE, 1); nextSub = c.text("", 12.5f, 0xB3FFFFFF.toInt())
+        ntexts.addView(nextTitle); ntexts.addView(nextSub)
+        nrow.addView(ntexts, lp(0, WRAP, 1f))
+        nextCard.addView(nrow)
+        col.addView(nextCard, lp(MATCH, WRAP).apply { topMargin = c.dp(14); bottomMargin = c.dp(12) })
 
         // gestos: deslizar abajo cierra; deslizar la portada a los lados cambia de canción
         val gd = GestureDetector(c, object : GestureDetector.SimpleOnGestureListener() {
@@ -239,6 +312,60 @@ class PlayerFragment : Fragment() {
         }
     }
 
+    /** Las próximas canciones en el orden real (respeta el aleatorio). Índice en la cola + canción. */
+    private fun upcoming(s: PlaybackService, n: Int): List<Pair<Int, Track>> {
+        val p = s.active; val tl = p.currentTimeline
+        if (tl.isEmpty) return emptyList()
+        val out = ArrayList<Pair<Int, Track>>()
+        var i = p.currentMediaItemIndex
+        val rep = if (p.repeatMode == Player.REPEAT_MODE_ALL) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
+        while (out.size < n) {
+            i = tl.getNextWindowIndex(i, rep, p.shuffleModeEnabled)
+            if (i == androidx.media3.common.C.INDEX_UNSET || i == p.currentMediaItemIndex) break
+            val id = p.getMediaItemAt(i).mediaId.toLongOrNull()
+            s.queue.firstOrNull { it.id == id }?.let { out += i to it }
+        }
+        return out
+    }
+
+    private var nextId = -2L
+    private fun renderNext(s: PlaybackService) {
+        val n = upcoming(s, 1).firstOrNull()
+        nextCard.visibility = if (n == null || s.dj != null) View.GONE else View.VISIBLE
+        if (n == null || n.second.id == nextId) return
+        nextId = n.second.id
+        nextTitle.text = n.second.title
+        nextSub.text = n.second.artist.ifEmpty { s.playlistName }
+        nextImg.load(Covers.fileFor(requireContext(), n.second))
+    }
+
+    private fun showQueue() {
+        val s = PlayerHub.service ?: return
+        val list = upcoming(s, 25)
+        if (list.isEmpty()) { android.widget.Toast.makeText(requireContext(), "No hay más canciones en la cola", android.widget.Toast.LENGTH_SHORT).show(); return }
+        MenuSheet.show(requireContext(), "A continuación", "De «${s.playlistName.ifEmpty { "Todas las canciones" }}»",
+            list.map { (idx, t) -> MenuSheet.Item(R.drawable.ic_music, t.title, t.artist.ifEmpty { null }) { s.jumpTo(idx) } })
+    }
+
+    private fun addToPlaylist() {
+        val s = PlayerHub.service ?: return
+        val t = s.current() ?: return
+        val a = activity as? androidx.appcompat.app.AppCompatActivity ?: return
+        PlaylistPicker.show(a, "Agregar a playlist", emptySet(), null, "Agregar") { ids, names ->
+            a.lifecycleScope.launch {
+                Library.addToPlaylists(a, listOf(t.id), ids)
+                android.widget.Toast.makeText(a, "Agregada a $names ✓", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun share() {
+        val t = PlayerHub.service?.current() ?: return
+        val text = "🎵 ${t.title}" + (if (t.artist.isNotBlank()) " — ${t.artist}" else "") + "\nEscuchando en DownSong"
+        startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND)
+            .setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, text), "Compartir canción"))
+    }
+
     private val tick = object : Runnable {
         override fun run() {
             val s = PlayerHub.service
@@ -265,12 +392,15 @@ class PlayerFragment : Fragment() {
         shuffleBtn.setColorFilter(if (s.active.shuffleModeEnabled) BRAND_RED else Color.WHITE)
         repeatBtn.setImageResource(if (s.active.repeatMode == Player.REPEAT_MODE_ONE) R.drawable.ic_repeat_one else R.drawable.ic_repeat)
         repeatBtn.setColorFilter(if (s.active.repeatMode == Player.REPEAT_MODE_OFF) Color.WHITE else BRAND_RED)
-        videoBtn.visibility = if (t.hasVideo) View.VISIBLE else View.GONE
-        videoBtn.setColorFilter(if (s.showVideo) BRAND_RED else Color.WHITE)
-
         val showVideo = s.showVideo && t.hasVideo
+        videoChip.visibility = if (t.hasVideo) View.VISIBLE else View.GONE
+        videoChip.text = if (showVideo) "Cambiar a audio" else "Cambiar a video"
         video.visibility = if (showVideo) View.VISIBLE else View.GONE
+        videoScrim.visibility = video.visibility
+        thumb.visibility = video.visibility
         if (showVideo) { if (video.player !== s.active) video.player = s.active } else video.player = null
+        art.visibility = if (showVideo) View.INVISIBLE else View.VISIBLE
+        renderNext(s)
         val useK = Covers.usesKaleido(c, t) && Prefs2(c).kaleidoNoCover
         val full = useK && !showVideo
         kaleido.visibility = View.GONE
@@ -292,6 +422,7 @@ class PlayerFragment : Fragment() {
             lastId = t.id
             val f = Covers.fileFor(c, t)
             coverImg.load(f)
+            thumb.load(f)
             lifecycleScope.launch {
                 color = Art.color(f)
                 root.background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,

@@ -165,3 +165,11 @@ DJ desde playlist y desde canción).
 - Detector de playlists de Spotify v2: filtro "Playlists" de Tu biblioteca, reconoce `spotify:playlist:<id>` en
   cualquier atributo, baja la lista, respaldo en /collection/playlists (solo si no redirige) y diagnóstico en el informe.
 - Menú ⋯ de Descargar al estilo Spotify (MenuSheet: hoja inferior con ícono, título y ayuda por opción).
+
+## v2.15 (reproductor rediseñado)
+- Video a pantalla completa detrás de todo (RESIZE_MODE_ZOOM) con degradado oscuro abajo; la portada se oculta.
+- Chip "Cambiar a video / a audio" sobre el título; miniatura de la portada junto al título en modo video.
+- Título y artista que se deslizan si son largos; botón ⊕ para agregar a otra playlist.
+- Barra de progreso fina (4 dp) con punto pequeño; menú ⋮ vertical.
+- Fila inferior: sonido (ajustes), compartir, cola. Tarjeta "A continuación" (próxima canción, abre la cola).
+- Portadas de Spotify en máxima resolución (ab67616d000082c1, ~1400 px; respaldo 640 px).

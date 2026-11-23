@@ -66,8 +66,12 @@ object SpotifySource {
         js.optString("thumbnail_url").takeIf { it.startsWith("http") }?.let { hq(it) }
     }.getOrNull()
 
-    /** Portada en alta resolución (640 px) en lugar de la de 300 o 64 px. */
-    fun hq(url: String): String = url.replace("ab67616d00001e02", "ab67616d0000b273").replace("ab67616d00004851", "ab67616d0000b273")
+    /** Portada en la máxima resolución que da Spotify (~1400 px; antes 640 o 300 px). */
+    fun hq(url: String): String = url.replace("ab67616d00001e02", "ab67616d000082c1").replace("ab67616d00004851", "ab67616d000082c1")
+        .replace("ab67616d0000b273", "ab67616d000082c1")
+
+    /** Si la de máxima resolución no existe para esa portada, la de 640 px. */
+    fun fallback(url: String): String = url.replace("ab67616d000082c1", "ab67616d0000b273")
 
     /** Devuelve (nombre, ¿es lista?, canciones). */
     fun fetch(url: String): Triple<String, Boolean, List<VideoItem>> {
