@@ -194,3 +194,11 @@ DJ desde playlist y desde canción).
   abren también pausan. Los contadores solo vuelven a cero tras 15 s sonando bien.
 - Aviso de batería también al empezar a escuchar (antes solo en descargas y DJ).
 - Probado: playlist con 13 archivos borrados; antes saltaba sin parar, ahora prueba y se detiene. Canciones normales siguen bien.
+
+## v2.18 (recuperación automática del reproductor)
+- En el Huawei del usuario la música se pausaba tras 1-5 canciones con pantalla encendida (no se reproduce en el
+  emulador: 6 cambios de canción seguidos y 3 caídas de audioserver sin errores).
+- Escalera de recuperación ante errores pasajeros: 2 reintentos de la misma canción → se quitan ecualizador y realce de
+  volumen (LoudnessEnhancer/Equalizer, sospechosos en Huawei; quedan apagados en la sesión) → reproductor nuevo con la
+  misma lista, canción y posición (`rebuild`). Solo si todo falla (9 errores en 90 s) se pausa, y el aviso muestra el
+  código del error (errorCodeName) para diagnosticar.

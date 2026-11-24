@@ -179,8 +179,8 @@ class PlaybackService : MediaSessionService() {
         procs[p] = dp
         val sid = Util.generateAudioSessionIdV21(this)
         p.setAudioSessionId(sid)
-        enhancers[p] = runCatching { LoudnessEnhancer(sid).apply { enabled = true } }.getOrNull()
-        eqs[p] = runCatching { Equalizer(0, sid) }.getOrNull()?.also { Eq.apply(it, Prefs2(this)) }
+        enhancers[p] = if (effectsOff) null else runCatching { LoudnessEnhancer(sid).apply { enabled = true } }.getOrNull()
+        eqs[p] = if (effectsOff) null else runCatching { Equalizer(0, sid) }.getOrNull()?.also { Eq.apply(it, Prefs2(this)) }
         p.addListener(PlayerListener(p))
         return p
     }
@@ -353,6 +353,10 @@ class PlaybackService : MediaSessionService() {
     /** Errores seguidos de reproducción (para no saltar canciones sin fin). Se reinicia tras 15 s sonando bien. */
     private var errStreak = 0
     private var retries = 0
+    /** 0 = normal, 1 = sin efectos de audio, 2 = reproductor reconstruido. Vuelve a 0 tras 15 s sonando bien. */
+    private var recoverLevel = 0
+    /** Si alguna vez los efectos causaron fallos, no se vuelven a poner en esta sesión. */
+    private var effectsOff = false
     private fun toast(msg: String) = handler.post { android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show() }
     private val errTimes = ArrayDeque<Long>()
 
@@ -515,6 +519,32 @@ class PlaybackService : MediaSessionService() {
         return v * duck
     }
 
+    /** Cambia un reproductor trabado por uno nuevo con la misma lista, canción y posición. */
+    private fun rebuild(old: ExoPlayer) {
+        runCatching {
+            cancelFade()
+            val items = (0 until old.mediaItemCount).map { old.getMediaItemAt(it) }
+            val idx = old.currentMediaItemIndex.coerceAtLeast(0); val pos = old.currentPosition.coerceAtLeast(0)
+            val np = build()
+            np.shuffleModeEnabled = old.shuffleModeEnabled; np.repeatMode = old.repeatMode
+            if (items.isNotEmpty()) {
+                np.setMediaItems(items, idx, pos)
+                if (items.size == queue.size) np.setShuffleOrder(smartOrder(queue, idx))
+            }
+            if (old === p1) p1 = np else p2 = np
+            val wasActive = active === old
+            if (wasActive) { active = np; session.player = np }
+            procs.remove(old)
+            runCatching { enhancers.remove(old)?.release() }; runCatching { eqs.remove(old)?.release() }
+            runCatching { old.release() }
+            if (wasActive) {
+                val t = trackOf(np); np.volume = volFor(t); applyBoost(np, t)
+                np.prepare(); np.play()
+            }
+            updateButtons(); notifyUi()
+        }.onFailure { BlackBox.log(this, "no se pudo reconstruir el reproductor: ${it.javaClass.simpleName}") }
+    }
+
     private fun applyBoost(p: ExoPlayer, t: Track?) {
         val g = t?.gainDb ?: 0f
         val mb = if (prefs.normalize && g > 0f) (g * 100).toInt() else 0
@@ -541,7 +571,7 @@ class PlaybackService : MediaSessionService() {
             try { step() } catch (e: Exception) { Log.w(TAG, "tick", e); BlackBox.log(this@PlaybackService, "error interno: ${e.javaClass.simpleName}") }
             if (++saveTicks >= 40) { saveTicks = 0; if (active.isPlaying) save() }
             // sonando bien más de 15 s: los contadores de errores vuelven a cero
-            if ((errStreak > 0 || retries > 0) && active.isPlaying && active.currentPosition > 15_000) { errStreak = 0; retries = 0 }
+            if ((errStreak > 0 || retries > 0 || recoverLevel > 0) && active.isPlaying && active.currentPosition > 15_000) { errStreak = 0; retries = 0; recoverLevel = 0 }
             val near = dj != null && !fading && nextStep != null && active.isPlaying &&
                 (djT0() - active.currentPosition) / curSpeed < 4000
             handler.postDelayed(this, if (fading || near) 40 else 250)
@@ -1001,14 +1031,33 @@ class PlaybackService : MediaSessionService() {
             // ahorro de batería). Se pausa en vez de saltar canción tras canción.
             val now = SystemClock.elapsedRealtime()
             errTimes.addLast(now); while (errTimes.isNotEmpty() && now - errTimes.first() > 90_000) errTimes.removeFirst()
-            if (errTimes.size >= 5) {
-                BlackBox.log(this@PlaybackService, "muchos errores seguidos: se pausa la música (no se saltan canciones)")
-                errTimes.clear(); errStreak = 0; retries = 0
+            if (errTimes.size >= 9) {
+                BlackBox.log(this@PlaybackService, "muchos errores seguidos (${error.errorCodeName}): se pausa la música")
+                errTimes.clear(); errStreak = 0; retries = 0; recoverLevel = 0
                 cancelFade(); p1.pause(); p2.pause(); notifyUi()
-                toast("La música se pausó: el celular cortó el audio. Toca ▶ para seguir."); return
+                toast("La música se pausó (${error.errorCodeName}). Toca ▶ para seguir y envíanos el informe."); return
             }
             // Fallo pasajero (sin salida de audio o el decodificador recuperado por el sistema): la misma canción,
             // desde donde iba. La canción no tiene la culpa: no se salta.
+            if (transient(error) && retries >= 2 && p === active && recoverLevel < 2) {
+                recoverLevel++
+                retries = 0
+                if (recoverLevel == 1) {
+                    // 1) quitar ecualizador y realce de volumen de este reproductor (en algunos celulares rompen la salida)
+                    BlackBox.log(this@PlaybackService, "recuperación 1: sin efectos de audio (${error.errorCodeName})")
+                    effectsOff = true
+                    for (q in listOf(p1, p2)) {
+                        runCatching { enhancers[q]?.release() }; enhancers[q] = null
+                        runCatching { eqs[q]?.release() }; eqs[q] = null
+                    }
+                    handler.postDelayed({ if (p === active) { p.prepare(); p.play() } }, 600)
+                } else {
+                    // 2) reproductor nuevo desde donde iba (el viejo quedó trabado)
+                    BlackBox.log(this@PlaybackService, "recuperación 2: reproductor nuevo (${error.errorCodeName})")
+                    handler.post { rebuild(p) }
+                }
+                return
+            }
             if (transient(error) && retries < 2 && p === active) {
                 retries++
                 val idx = p.currentMediaItemIndex; val pos = p.currentPosition
