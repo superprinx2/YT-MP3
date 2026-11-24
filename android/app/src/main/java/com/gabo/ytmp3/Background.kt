@@ -27,22 +27,28 @@ object Background {
      * Antes de una descarga: si falta el permiso de batería (o en Huawei, la primera vez, "Gestionar manualmente"),
      * se explica y se lleva al ajuste. [then] sigue con la descarga pase lo que pase.
      */
-    fun beforeDownload(a: AppCompatActivity, count: Int, then: () -> Unit) {
+    fun beforeDownload(a: AppCompatActivity, count: Int, then: () -> Unit) = ask(a, count >= 3, false, then)
+
+    /** Al empezar a escuchar: sin este permiso Huawei corta el audio a los pocos minutos con el celular bloqueado. */
+    fun beforePlayback(a: AppCompatActivity) = ask(a, true, true) {}
+
+    private fun ask(a: AppCompatActivity, worth: Boolean, music: Boolean, then: () -> Unit) {
         val sp = a.getSharedPreferences("background", 0)
         val exempt = Device.ignoresBatteryOptimizations(a)
         val needHuawei = huawei && !sp.getBoolean("huawei_done", false)
         val snoozed = System.currentTimeMillis() < sp.getLong("snooze_until", 0L)
-        if ((exempt && !needHuawei) || count < 3 || snoozed) { then(); return }
+        if ((exempt && !needHuawei) || !worth || snoozed) { then(); return }
         val steps = buildString {
-            append("Para que las descargas sigan con el celular bloqueado:")
+            append(if (music) "Para que la música no se corte con el celular bloqueado:" else "Para que las descargas sigan con el celular bloqueado:")
             if (!exempt) append("\n\n1. Permite que DownSong funcione sin restricciones de batería.")
             if (huawei) append("\n\n${if (exempt) "1" else "2"}. Huawei: Ajustes › Batería › Inicio de aplicaciones › DownSong › " +
                 "desactiva «Gestionar automáticamente» y activa las 3 opciones (inicio automático, inicio secundario y " +
                 "ejecución en segundo plano).")
-            append("\n\nSi no, el sistema congela la app al bloquear el celular y la descarga se detiene.")
+            append(if (music) "\n\nSi no, el sistema le quita el audio a la app a los pocos minutos de bloquear el celular."
+                   else "\n\nSi no, el sistema congela la app al bloquear el celular y la descarga se detiene.")
         }
         MaterialAlertDialogBuilder(a)
-            .setTitle("Descargar con el celular bloqueado")
+            .setTitle(if (music) "Música con el celular bloqueado" else "Descargar con el celular bloqueado")
             .setMessage(steps)
             .setPositiveButton("Configurar") { _, _ ->
                 if (!exempt) SettingsActivity.requestBatteryExemption(a)

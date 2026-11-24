@@ -350,8 +350,20 @@ class PlaybackService : MediaSessionService() {
     }
 
     private var saveTicks = 0
-    /** Errores seguidos de reproducción (para no saltar canciones sin fin). */
+    /** Errores seguidos de reproducción (para no saltar canciones sin fin). Se reinicia tras 15 s sonando bien. */
     private var errStreak = 0
+    private var retries = 0
+    private fun toast(msg: String) = handler.post { android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show() }
+    private val errTimes = ArrayDeque<Long>()
+
+    /** Errores que no son culpa del archivo: el sistema cortó la salida de audio o recuperó el decodificador. */
+    private fun transient(e: PlaybackException): Boolean = when (e.errorCode) {
+        PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED, PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED,
+        PlaybackException.ERROR_CODE_DECODER_INIT_FAILED, PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
+        PlaybackException.ERROR_CODE_DECODING_FAILED, PlaybackException.ERROR_CODE_TIMEOUT,
+        PlaybackException.ERROR_CODE_UNSPECIFIED, PlaybackException.ERROR_CODE_IO_UNSPECIFIED -> true
+        else -> e.errorCode in 5000..5999
+    }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = session
 
@@ -528,6 +540,8 @@ class PlaybackService : MediaSessionService() {
         override fun run() {
             try { step() } catch (e: Exception) { Log.w(TAG, "tick", e); BlackBox.log(this@PlaybackService, "error interno: ${e.javaClass.simpleName}") }
             if (++saveTicks >= 40) { saveTicks = 0; if (active.isPlaying) save() }
+            // sonando bien más de 15 s: los contadores de errores vuelven a cero
+            if ((errStreak > 0 || retries > 0) && active.isPlaying && active.currentPosition > 15_000) { errStreak = 0; retries = 0 }
             val near = dj != null && !fading && nextStep != null && active.isPlaying &&
                 (djT0() - active.currentPosition) / curSpeed < 4000
             handler.postDelayed(this, if (fading || near) 40 else 250)
@@ -982,22 +996,45 @@ class PlaybackService : MediaSessionService() {
         override fun onPlayerError(error: PlaybackException) {
             val t = trackOf(p)
             BlackBox.log(this@PlaybackService, "error al reproducir «${t?.title?.take(40)}»: ${error.errorCodeName}")
+            if (p !== active && dj == null) return
+            // Freno general: muchos errores en poco tiempo = el sistema le quitó el audio a la app (celular bloqueado,
+            // ahorro de batería). Se pausa en vez de saltar canción tras canción.
+            val now = SystemClock.elapsedRealtime()
+            errTimes.addLast(now); while (errTimes.isNotEmpty() && now - errTimes.first() > 90_000) errTimes.removeFirst()
+            if (errTimes.size >= 5) {
+                BlackBox.log(this@PlaybackService, "muchos errores seguidos: se pausa la música (no se saltan canciones)")
+                errTimes.clear(); errStreak = 0; retries = 0
+                cancelFade(); p1.pause(); p2.pause(); notifyUi()
+                toast("La música se pausó: el celular cortó el audio. Toca ▶ para seguir."); return
+            }
+            // Fallo pasajero (sin salida de audio o el decodificador recuperado por el sistema): la misma canción,
+            // desde donde iba. La canción no tiene la culpa: no se salta.
+            if (transient(error) && retries < 2 && p === active) {
+                retries++
+                val idx = p.currentMediaItemIndex; val pos = p.currentPosition
+                handler.postDelayed({
+                    if (p !== active) return@postDelayed
+                    p.prepare(); if (idx >= 0 && idx < p.mediaItemCount) p.seekTo(idx, pos); p.play()
+                }, 1200L * retries)
+                return
+            }
+            retries = 0
             if (dj != null) {
                 if (p === active) handler.post { djRescue("archivo con error") }
                 else { armed = false; handler.post { planNext(true) } }
                 return
             }
             if (p !== active) return
-            if (++errStreak > 3) {
+            if (++errStreak >= 3) {
                 BlackBox.log(this@PlaybackService, "varias canciones seguidas no se pudieron reproducir: se detiene")
-                errStreak = 0; p.playWhenReady = false; notifyUi(); return
+                errStreak = 0; p.playWhenReady = false; notifyUi()
+                toast("Se pausó: varias canciones seguidas no se pudieron abrir (¿se borraron o movieron?)"); return
             }
             if (p.hasNextMediaItem()) { p.seekToNextMediaItem(); p.prepare(); p.play() }
         }
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (p !== active) return
             if (playbackState == Player.STATE_ENDED && dj != null) { handler.post { djRescue("terminó la lista") }; return }
-            if (playbackState == Player.STATE_READY) errStreak = 0
             // Fin de la playlist sin "repetir": vuelve a la primera canción y queda en pausa
             if (playbackState == Player.STATE_ENDED && p.repeatMode == Player.REPEAT_MODE_OFF && p.mediaItemCount > 0) {
                 handler.post {

@@ -184,3 +184,13 @@ DJ desde playlist y desde canción).
 - Ajustes › Biblioteca: las secciones salían duplicadas (onCreate + onResume construían la pantalla dos veces).
 - Pruebas: 19 000 acciones aleatorias (monkey, 4 rondas) sin cierres ni bloqueos; 15 formatos raros (FLAC, M4A, OGG,
   OPUS, WAV 96 kHz/24 bits, AMR, 5.1, 1 s, mix de 2 h, silencio, archivo roto y vacío) agregados y reproducidos.
+
+## v2.17 (música que se cortaba y saltaba canciones)
+- Causa: con el celular bloqueado, Huawei le quita a la app la salida de audio o el decodificador (ahorro de batería).
+  ExoPlayer da error y el servicio lo trataba como "canción mala": saltaba a la siguiente, que fallaba igual, y así sin
+  fin. El freno de 2.10 se reiniciaba en cada STATE_READY, por eso nunca paraba (y en el DJ, djRescue hacía lo mismo).
+- Arreglo: errores pasajeros (salida de audio, decodificador, tiempo agotado) reintentan la MISMA canción desde donde
+  iba (2 veces, con espera). Freno general: 5 errores en 90 s pausan la música con aviso. 3 canciones seguidas que no
+  abren también pausan. Los contadores solo vuelven a cero tras 15 s sonando bien.
+- Aviso de batería también al empezar a escuchar (antes solo en descargas y DJ).
+- Probado: playlist con 13 archivos borrados; antes saltaba sin parar, ahora prueba y se detiene. Canciones normales siguen bien.

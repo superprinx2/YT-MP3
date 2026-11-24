@@ -388,6 +388,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun openPlayer() {
+        Background.beforePlayback(this)
         if (PlayerHub.service?.dj != null) { openDjScreen(); return }
         if (PlayerHub.service?.current() == null) return
         val fm = supportFragmentManager
